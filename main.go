@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
+	//"strings"
 	"sync"
 	"time"
 
@@ -448,7 +448,7 @@ func createLiveStreamEmbed(username string, streamInfo *api.StreamResponse, avat
 }
 
 func createPostEmbed(username string, post api.Post, avatarLocation string) *discordgo.MessageEmbed {
-	postURL := fmt.Sprintf("https://fansly.com/post/%s", post.ID)
+	postURL := fmt.Sprintf("https://fans.ly/post/%s", post.ID)
 	creatorUrl := fmt.Sprintf("https://fansly.com/%s", username)
 	createdTime := time.Unix(post.CreatedAt, 0)
 	//fmt.Printf("CreatedAt: %v, Converted time: %v\n", post.CreatedAt, createdTime)
@@ -474,31 +474,11 @@ func createPostEmbed(username string, post api.Post, avatarLocation string) *dis
 	//fmt.Printf("Media Items: %v", mediaItems)
 	if err != nil {
 		log.Printf("Error fetching post media: %v", err)
-	} else {
-		for _, accountMedia := range mediaItems {
-			// Use preview if available, otherwise use the main media
-			mediaItem := accountMedia.Media
-			if accountMedia.Preview != nil {
-				mediaItem = *accountMedia.Preview
-			}
-
-			if len(mediaItem.Locations) > 0 {
-				mimeType := mediaItem.Mimetype
-				if strings.HasPrefix(mimeType, "image/") {
-					embed.Image = &discordgo.MessageEmbedImage{
-						URL: mediaItem.Locations[0].Location,
-					}
-					//fmt.Printf("Image URL: %v", mediaItem.Locations[0].Location)
-					break // Only use the first image
-				} else if strings.HasPrefix(mimeType, "video/") {
-					embed.Video = &discordgo.MessageEmbedVideo{
-						URL: mediaItem.Locations[0].Location,
-					}
-					//fmt.Printf("Video URL: %v", mediaItem.Locations[0].Location)
-					break // Only use the first video
-				}
-			}
-		}
+	} else if len(mediaItems) > 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:  "Post Media",
+			Value: fmt.Sprintf(":eyes: View on Fansly to see media\n %v", postURL),
+		})
 	}
 
 	//fmt.Printf("Embed Item: %v", embed)
