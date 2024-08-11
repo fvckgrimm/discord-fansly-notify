@@ -14,6 +14,7 @@ import (
 
 func (c *Client) GetAccountInfo(username string) (*ModelAccountInfo, error) {
 	url := fmt.Sprintf("%s/api/v1/account?usernames=%s&ngsw-bypass=true", c.BaseURL, username)
+	//fmt.Printf("Creator Request Url: %v\n", url)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -25,6 +26,8 @@ func (c *Client) GetAccountInfo(username string) (*ModelAccountInfo, error) {
 	}
 	defer resp.Body.Close()
 
+	//fmt.Printf("Creator Response: %v", resp)
+
 	var result struct {
 		Success  bool               `json:"success"`
 		Response []ModelAccountInfo `json:"response"`
@@ -35,6 +38,10 @@ func (c *Client) GetAccountInfo(username string) (*ModelAccountInfo, error) {
 
 	if !result.Success || len(result.Response) == 0 {
 		return nil, fmt.Errorf("failed to get account info for %s", username)
+	}
+
+	if len(result.Response) == 0 {
+		return nil, fmt.Errorf("no account info found for %s", username)
 	}
 
 	return &result.Response[0], nil

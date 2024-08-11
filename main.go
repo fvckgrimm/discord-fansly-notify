@@ -198,9 +198,17 @@ func handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	accountInfo, err := apiClient.GetAccountInfo(username)
 	if err != nil {
+		log.Printf("Error getting account info for %s: %v", username, err)
 		respondToInteraction(s, i, fmt.Sprintf("Error: %v", err))
 		return
 	}
+
+	if accountInfo == nil || accountInfo.Avatar.Locations == nil || len(accountInfo.Avatar.Variants) == 0 || len(accountInfo.Avatar.Variants[0].Locations) == 0 {
+		log.Printf("Invalid account info structure for %s", username)
+		respondToInteraction(s, i, "Error: Invalid account info structure")
+		return
+	}
+
 	avatarLocation := accountInfo.Avatar.Variants[0].Locations[0].Location
 
 	// Check if the account is already being followed
