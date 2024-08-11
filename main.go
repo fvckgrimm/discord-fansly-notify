@@ -102,6 +102,8 @@ func main() {
 
 func ready(s *discordgo.Session, event *discordgo.Ready) {
 	log.Println("Bot is ready")
+	manageServerPerm := int64(discordgo.PermissionManageServer)
+
 	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", []*discordgo.ApplicationCommand{
 		{
 			Name:        "add",
@@ -126,6 +128,7 @@ func ready(s *discordgo.Session, event *discordgo.Ready) {
 					Required:    false,
 				},
 			},
+			DefaultMemberPermissions: &manageServerPerm,
 		},
 		{
 			Name:        "remove",
@@ -138,6 +141,7 @@ func ready(s *discordgo.Session, event *discordgo.Ready) {
 					Required:    true,
 				},
 			},
+			DefaultMemberPermissions: &manageServerPerm,
 		},
 	})
 	if err != nil {
@@ -147,7 +151,32 @@ func ready(s *discordgo.Session, event *discordgo.Ready) {
 	}
 }
 
+func hasAdminOrModPermissions(s *discordgo.Session, i *discordgo.InteractionCreate) bool {
+	// Check if the user is the server owner
+	guild, err := s.Guild(i.GuildID)
+	if err == nil && guild.OwnerID == i.Member.User.ID {
+		return true
+	}
+
+	// Check for administrator permission
+	if i.Member.Permissions&discordgo.PermissionAdministrator == discordgo.PermissionAdministrator {
+		return true
+	}
+
+	// Check for manage server permission (typically given to moderators)
+	if i.Member.Permissions&discordgo.PermissionManageServer == discordgo.PermissionManageServer {
+		return true
+	}
+
+	return false
+}
+
 func interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !hasAdminOrModPermissions(s, i) {
+		respondToInteraction(s, i, "You do not have permission to use this command.")
+		return
+	}
+
 	switch i.ApplicationCommandData().Name {
 	case "add":
 		handleAddCommand(s, i)
