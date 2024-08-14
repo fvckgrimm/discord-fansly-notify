@@ -15,6 +15,9 @@ Firstly download or clone the repository:
 ```bash
 git clone github.com/fvckgrimm/discord-fansly-notify && cd discord-fansly-notify
 
+# Create the .env to configure
+cp .env-example .env
+
 # Running the program
 go run .
 
