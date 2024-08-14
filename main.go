@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/fvckgrimm/discord-fansly-bot/api"
+	"github.com/fvckgrimm/discord-fansly-notify/api"
 	"github.com/joho/godotenv"
 	_ "modernc.org/sqlite"
 )

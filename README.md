@@ -13,7 +13,7 @@
 Firstly download or clone the repository:
 
 ```bash
-git clone github.com/fvckgrimm/discord-fansly-bot && cd discord-fansly-bot
+git clone github.com/fvckgrimm/discord-fansly-notify && cd discord-fansly-notify
 
 # Running the program
 go run .
