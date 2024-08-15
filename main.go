@@ -95,14 +95,28 @@ func main() {
 	defer discord.Close()
 
 	go monitorUsers(discord)
+	go updateStatusPeriodically(discord)
 
 	log.Println("Bot is now running. Press CTRL-C to exit.")
 	select {}
 }
 
+func updateStatusPeriodically(s *discordgo.Session) {
+	ticker := time.NewTicker(180 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		updateBotStatus(s)
+	}
+}
+
 func ready(s *discordgo.Session, event *discordgo.Ready) {
 	log.Println("Bot is ready")
+	serverCount := len(s.State.Guilds)
+	log.Printf("Currently active and monitoring in %d servers", serverCount)
 	manageServerPerm := int64(discordgo.PermissionManageServer)
+
+	updateBotStatus(s)
 
 	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", []*discordgo.ApplicationCommand{
 		{
@@ -148,6 +162,22 @@ func ready(s *discordgo.Session, event *discordgo.Ready) {
 		log.Printf("Error registering commands: %v", err)
 	} else {
 		log.Println("Commands registered successfully")
+	}
+}
+
+func updateBotStatus(s *discordgo.Session) {
+	serverCount := len(s.State.Guilds)
+	status := fmt.Sprintf("Watching %d servers", serverCount)
+	err := s.UpdateStatusComplex(discordgo.UpdateStatusData{
+		Activities: []*discordgo.Activity{
+			{
+				Name: status,
+				Type: discordgo.ActivityTypeWatching,
+			},
+		},
+	})
+	if err != nil {
+		log.Printf("Error updating status: %v", err)
 	}
 }
 
