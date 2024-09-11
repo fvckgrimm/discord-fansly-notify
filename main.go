@@ -71,12 +71,26 @@ func init() {
             last_stream_start INTEGER,
 			mention_role TEXT,
 			avatar_location TEXT,
+			avatar_location_updated_at INTEGER,
             PRIMARY KEY (guild_id, user_id)
         )
     `)
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func refreshAvatarURL(userID string) (string, error) {
+	accountInfo, err := apiClient.GetAccountInfo(userID)
+	if err != nil {
+		return "", err
+	}
+
+	if accountInfo == nil || accountInfo.Avatar.Locations == nil || len(accountInfo.Avatar.Variants) == 0 || len(accountInfo.Avatar.Variants[0].Locations) == 0 {
+		return "", fmt.Errorf("invalid account info structure for user %s", userID)
+	}
+
+	return accountInfo.Avatar.Variants[0].Locations[0].Location, nil
 }
 
 func main() {
@@ -278,9 +292,9 @@ func handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Store the monitored user in the database
 	_, err = db.Exec(`
         INSERT OR REPLACE INTO monitored_users 
-        (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location) 
-        VALUES (?, ?, ?, ?, '', 0, ?, ?)
-    `, i.GuildID, accountInfo.ID, username, channel.ID, mentionRole, avatarLocation)
+        (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at) 
+        VALUES (?, ?, ?, ?, '', 0, ?, ?, ?)
+    `, i.GuildID, accountInfo.ID, username, channel.ID, mentionRole, avatarLocation, time.Now().Unix())
 	if err != nil {
 		respondToInteraction(s, i, fmt.Sprintf("Error storing user: %v", err))
 		return
@@ -331,7 +345,7 @@ func monitorUsers(s *discordgo.Session) {
 			}
 			defer tx.Rollback()
 
-			rows, err := tx.Query("SELECT guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location FROM monitored_users")
+			rows, err := tx.Query("SELECT guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at FROM monitored_users")
 			if err != nil {
 				return err
 			}
@@ -339,16 +353,17 @@ func monitorUsers(s *discordgo.Session) {
 
 			for rows.Next() {
 				var user struct {
-					GuildID             string
-					UserID              string
-					Username            string
-					NotificationChannel string
-					LastPostID          string
-					LastStreamStart     int64
-					MentionRole         string
-					AvatarLocation      string
+					GuildID                 string
+					UserID                  string
+					Username                string
+					NotificationChannel     string
+					LastPostID              string
+					LastStreamStart         int64
+					MentionRole             string
+					AvatarLocation          string
+					AvatarLocationUpdatedAt int64
 				}
-				err := rows.Scan(&user.GuildID, &user.UserID, &user.Username, &user.NotificationChannel, &user.LastPostID, &user.LastStreamStart, &user.MentionRole, &user.AvatarLocation)
+				err := rows.Scan(&user.GuildID, &user.UserID, &user.Username, &user.NotificationChannel, &user.LastPostID, &user.LastStreamStart, &user.MentionRole, &user.AvatarLocation, &user.AvatarLocationUpdatedAt)
 				if err != nil {
 					log.Printf("Error scanning row: %v", err)
 					continue
@@ -359,6 +374,25 @@ func monitorUsers(s *discordgo.Session) {
 				if err != nil {
 					log.Printf("Error fetching stream info: %v", err)
 					continue
+				}
+
+				// Check if avatar URL needs refreshing (e.g., older than 6 days)
+				if time.Now().Unix()-user.AvatarLocationUpdatedAt > 6*24*60*60 {
+					newAvatarLocation, err := refreshAvatarURL(user.UserID)
+					if err != nil {
+						log.Printf("Error refreshing avatar URL for user %s: %v", user.Username, err)
+					} else {
+						_, err = tx.Exec(`
+                            UPDATE monitored_users 
+                            SET avatar_location = ?, avatar_location_updated_at = ?
+                            WHERE guild_id = ? AND user_id = ?
+                        `, newAvatarLocation, time.Now().Unix(), user.GuildID, user.UserID)
+						if err != nil {
+							log.Printf("Error updating avatar URL in database: %v", err)
+						} else {
+							user.AvatarLocation = newAvatarLocation
+						}
+					}
 				}
 
 				if streamInfo.Response.Stream.Status == 2 && streamInfo.Response.Stream.StartedAt > user.LastStreamStart {
