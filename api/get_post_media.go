@@ -25,11 +25,13 @@ type Location struct {
 type MediaItem struct {
 	ID       string `json:"id"`
 	Type     int    `json:"type"`
+	Width    int    `json:"width"`
 	Height   int    `json:"height"`
 	Mimetype string `json:"mimetype"`
 	Variants []struct {
 		ID        string     `json:"id"`
 		Type      int        `json:"type"`
+		Width     int        `json:"width"`
 		Height    int        `json:"height"`
 		Mimetype  string     `json:"mimetype"`
 		Locations []Location `json:"locations"`

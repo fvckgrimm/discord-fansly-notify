@@ -448,7 +448,8 @@ func monitorUsers(s *discordgo.Session) {
 						log.Printf("Error sending post notification: %v", err)
 					}
 				} else if len(postInfo) == 0 {
-					log.Printf("No new posts found for user %s", user.Username)
+					//log.Printf("No new posts found for user %s", user.Username)
+					continue
 				}
 			}
 

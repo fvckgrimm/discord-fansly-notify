@@ -70,6 +70,10 @@ func (c *Client) GetTimelinePost(modelID string) ([]Post, error) {
 		return nil, err
 	}
 
+	if !hasTimelineAccess(timelineResp) {
+		return nil, fmt.Errorf("no timeline access for user %s", modelID)
+	}
+
 	/*
 		isLive := streamResp.Success &&
 			streamResp.Response.Stream.Status == 2 &&
