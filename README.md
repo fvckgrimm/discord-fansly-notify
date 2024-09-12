@@ -22,7 +22,7 @@ cp .env-example .env
 go run .
 
 # Building Binary
-go build -v -ldflags "-w -s" -o fansly-notify .
+go build -v -ldflags "-w -s" -o fansly-notify ./cmd/fansly-notify/
 
 # Running the binary 
 ./fansly-notify
