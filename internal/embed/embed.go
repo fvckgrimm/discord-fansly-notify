@@ -9,7 +9,7 @@ import (
 	"github.com/fvckgrimm/discord-fansly-notify/api"
 )
 
-func CreateLiveStreamEmbed(username string, streamInfo *api.StreamResponse, avatarLocation string) *discordgo.MessageEmbed {
+func CreateLiveStreamEmbed(username string, streamInfo *api.StreamResponse, avatarLocation string, liveImageURL string) *discordgo.MessageEmbed {
 	liveURL := fmt.Sprintf("https://fansly.com/live/%s", username)
 	creatorUrl := fmt.Sprintf("https://fansly.com/%s", username)
 
@@ -40,6 +40,13 @@ func CreateLiveStreamEmbed(username string, streamInfo *api.StreamResponse, avat
 		},
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
+
+	if liveImageURL != "" {
+		embed.Image = &discordgo.MessageEmbedImage{
+			URL: liveImageURL,
+		}
+	}
+
 	return embed
 }
 

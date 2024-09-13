@@ -28,6 +28,8 @@ func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 		b.handleRemoveCommand(s, i)
 	case "list":
 		b.handleListCommand(s, i)
+	case "setliveimage":
+		b.handleSetLiveImageCommand(s, i)
 	}
 }
 
@@ -94,9 +96,9 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 	// Store the monitored user in the database
 	_, err = b.DB.Exec(`
         INSERT OR REPLACE INTO monitored_users 
-        (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at) 
-        VALUES (?, ?, ?, ?, '', 0, ?, ?, ?)
-    `, i.GuildID, accountInfo.ID, username, channel.ID, mentionRole, avatarLocation, time.Now().Unix())
+        (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url) 
+        VALUES (?, ?, ?, ?, '', 0, ?, ?, ?, ?)
+		`, i.GuildID, accountInfo.ID, username, channel.ID, mentionRole, avatarLocation, time.Now().Unix(), "")
 	if err != nil {
 		b.respondToInteraction(s, i, fmt.Sprintf("Error storing user: %v", err))
 		return
@@ -180,6 +182,64 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 
 	response := "Monitored models:\n" + strings.Join(monitoredUsers, "\n")
 	b.respondToInteraction(s, i, response)
+}
+
+func (b *Bot) handleSetLiveImageCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// Acknowledge the interaction immediately
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+	if err != nil {
+		log.Printf("Error acknowledging interaction: %v", err)
+		return
+	}
+
+	if !b.hasAdminOrModPermissions(s, i) {
+		b.editInteractionResponse(s, i, "You need administrator permissions to use this command.")
+		return
+	}
+
+	options := i.ApplicationCommandData().Options
+	username := options[0].StringValue()
+
+	var imageURL string
+	if len(i.ApplicationCommandData().Resolved.Attachments) > 0 {
+		for _, attachment := range i.ApplicationCommandData().Resolved.Attachments {
+			imageURL = attachment.URL
+			//log.Println(imageURL)
+			break
+		}
+	}
+
+	if imageURL == "" {
+		b.editInteractionResponse(s, i, "Please attach an image to set as the live image.")
+		return
+	}
+
+	// Update the database with the new live image URL
+	_, err = b.DB.Exec(`
+        UPDATE monitored_users 
+        SET live_image_url = ? 
+        WHERE guild_id = ? AND username = ?
+    `, imageURL, i.GuildID, username)
+
+	if err != nil {
+		log.Printf("Error updating live image URL: %v", err)
+		b.editInteractionResponse(s, i, "An error occurred while setting the live image.")
+		return
+	}
+
+	b.editInteractionResponse(s, i, fmt.Sprintf("Live image for %s has been set successfully.", username))
+}
+
+// Add this new helper function
+func (b *Bot) editInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &content,
+	})
+	if err != nil {
+		log.Printf("Error editing interaction response: %v", err)
+	}
 }
 
 func (b *Bot) hasAdminOrModPermissions(s *discordgo.Session, i *discordgo.InteractionCreate) bool {

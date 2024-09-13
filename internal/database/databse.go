@@ -35,6 +35,7 @@ func createTables() {
 			mention_role TEXT,
 			avatar_location TEXT,
 			avatar_location_updated_at INTEGER,
+			live_image_url	TEXT,
 			PRIMARY KEY (guild_id, user_id)
 		)
 	`)

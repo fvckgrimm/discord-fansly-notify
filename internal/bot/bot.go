@@ -84,7 +84,7 @@ func (b *Bot) monitorUsers() {
 			}
 			defer tx.Rollback()
 
-			rows, err := tx.Query("SELECT guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at FROM monitored_users")
+			rows, err := tx.Query("SELECT guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url FROM monitored_users")
 			if err != nil {
 				return err
 			}
@@ -101,9 +101,10 @@ func (b *Bot) monitorUsers() {
 					MentionRole             string
 					AvatarLocation          string
 					AvatarLocationUpdatedAt int64
+					LiveImageURL            string
 				}
 
-				err := rows.Scan(&user.GuildID, &user.UserID, &user.Username, &user.NotificationChannel, &user.LastPostID, &user.LastStreamStart, &user.MentionRole, &user.AvatarLocation, &user.AvatarLocationUpdatedAt)
+				err := rows.Scan(&user.GuildID, &user.UserID, &user.Username, &user.NotificationChannel, &user.LastPostID, &user.LastStreamStart, &user.MentionRole, &user.AvatarLocation, &user.AvatarLocationUpdatedAt, &user.LiveImageURL)
 				if err != nil {
 					log.Printf("Error scanning row: %v", err)
 					continue
@@ -145,7 +146,7 @@ func (b *Bot) monitorUsers() {
 						return err
 					}
 
-					embedMsg := embed.CreateLiveStreamEmbed(user.Username, streamInfo, user.AvatarLocation)
+					embedMsg := embed.CreateLiveStreamEmbed(user.Username, streamInfo, user.AvatarLocation, user.LiveImageURL)
 
 					mention := "@everyone"
 					if user.MentionRole != "" {

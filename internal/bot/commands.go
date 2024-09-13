@@ -47,6 +47,24 @@ func (b *Bot) registerCommands() {
 			Name:        "list",
 			Description: "List all monitored models",
 		},
+		{
+			Name:        "setliveimage",
+			Description: "Set a custom live image for a model",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "username",
+					Description: "The username of the model",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionAttachment,
+					Name:        "image",
+					Description: "The image to use for live notifications",
+					Required:    true,
+				},
+			},
+		},
 	}
 
 	_, err := b.Session.ApplicationCommandBulkOverwrite(b.Session.State.User.ID, "", commands)

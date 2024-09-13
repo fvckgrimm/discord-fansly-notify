@@ -1,10 +1,9 @@
 import sqlite3
-import time
+# import time
 
 # Connect to the old and new databases
 old_conn = sqlite3.connect("bot-old.db")
 new_conn = sqlite3.connect("bot.db")
-
 old_cursor = old_conn.cursor()
 new_cursor = new_conn.cursor()
 
@@ -20,6 +19,7 @@ CREATE TABLE IF NOT EXISTS monitored_users (
     mention_role TEXT,
     avatar_location TEXT,
     avatar_location_updated_at INTEGER,
+    live_image_url TEXT,
     PRIMARY KEY (guild_id, user_id)
 )
 """)
@@ -30,16 +30,17 @@ old_records = old_cursor.fetchall()
 
 # Insert the old records into the new table
 for record in old_records:
-    # Assuming the order of columns in the old table is:
-    # guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location
     new_cursor.execute(
         """
     INSERT INTO monitored_users 
-    (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
-        (*record, int(time.time())),
-    )  # Add current timestamp for avatar_location_updated_at
+        (
+            *record,
+            None,
+        ),  # Add all existing fields from old record, plus None for live_image_url
+    )
 
 # Commit the changes and close the connections
 new_conn.commit()
