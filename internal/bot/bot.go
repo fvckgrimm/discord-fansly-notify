@@ -119,7 +119,7 @@ func (b *Bot) monitorUsers() {
 
 				// Check if avatar URL needs refreshing (e.g., older than 6 days)
 				if time.Now().Unix()-user.AvatarLocationUpdatedAt > 6*24*60*60 {
-					newAvatarLocation, err := b.refreshAvatarURL(user.UserID)
+					newAvatarLocation, err := b.refreshAvatarURL(user.Username)
 					if err != nil {
 						log.Printf("Error refreshing avatar URL for user %s: %v", user.Username, err)
 					} else {
@@ -238,14 +238,14 @@ func (b *Bot) retryDbOperation(operation func() error) error {
 	return fmt.Errorf("operation failed after %d retries", maxRetries)
 }
 
-func (b *Bot) refreshAvatarURL(userID string) (string, error) {
-	accountInfo, err := b.APIClient.GetAccountInfo(userID)
+func (b *Bot) refreshAvatarURL(username string) (string, error) {
+	accountInfo, err := b.APIClient.GetAccountInfo(username)
 	if err != nil {
 		return "", err
 	}
 
 	if accountInfo == nil || accountInfo.Avatar.Locations == nil || len(accountInfo.Avatar.Variants) == 0 || len(accountInfo.Avatar.Variants[0].Locations) == 0 {
-		return "", fmt.Errorf("invalid account info structure for user %s", userID)
+		return "", fmt.Errorf("invalid account info structure for user %s", username)
 	}
 
 	return accountInfo.Avatar.Variants[0].Locations[0].Location, nil
