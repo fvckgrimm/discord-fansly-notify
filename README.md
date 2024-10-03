@@ -8,6 +8,10 @@
 
 [Add to your server](https://discord.com/oauth2/authorize?client_id=1271878764933943467)
 
+## TODO:
+
+- [ ] Fix following logic to still add if account has no pfp and just let it be empty in the embed
+
 ## Running The Bot Yourself 
 
 Firstly download or clone the repository:
