@@ -11,6 +11,8 @@
 ## TODO:
 
 - [ ] Fix following logic to still add if account has no pfp and just let it be empty in the embed
+- [ ] Possibly separate live and post notification
+    - [ ] Allow enabling and disabling one or the other
 
 ## Running The Bot Yourself 
 
