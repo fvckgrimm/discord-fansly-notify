@@ -26,7 +26,7 @@ func New() (*Bot, error) {
 		return nil, err
 	}
 
-	apiClient := api.NewClient(config.FanslyToken, config.UserAgent)
+	apiClient, _ := api.NewClient(config.FanslyToken, config.UserAgent)
 
 	bot := &Bot{
 		Session:   discord,
