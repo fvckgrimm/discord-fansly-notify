@@ -1,8 +1,10 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/url"
 	"time"
@@ -41,6 +43,16 @@ type FollowingAccount struct {
 	AccountID string `json:"accountId"`
 }
 
+type FanslyError struct {
+	Code    int    `json:"code"`
+	Details string `json:"details"`
+}
+
+type FanslyResponse struct {
+	Success bool        `json:"success"`
+	Error   FanslyError `json:"error"`
+}
+
 func NewClient(token, userAgent string) (*Client, error) {
 	client := &Client{
 		HTTPClient: &http.Client{},
@@ -68,20 +80,29 @@ func NewClient(token, userAgent string) (*Client, error) {
 		client.CheckKey = checkKey
 	}
 
+	//fmt.Printf("[NewClient] Client: %v\n", client)
 	return client, nil
 }
 
 func (c *Client) sendRequest(req *http.Request) (*http.Response, error) {
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("Authorization", c.Token)
-	req.Header.Set("Origin", "https://fansly.com")
-	req.Header.Set("Referer", "https://fansly.com/")
-	req.Header.Set("User-Agent", c.UserAgent)
-	req.Header.Set("fansly-client-id", c.DeviceID)
-	req.Header.Set("fansly-client-ts", fmt.Sprintf("%d", getClientTimestamp()))
-	req.Header.Set("fansly-session-id", c.SessionID)
-	req.Header.Set("fansly-client-check", c.getFanslyClientCheck(req.URL.String()))
-	//fmt.Printf("URL: %v, TOKEN: %v, AGENT: %v", req, c.Token, c.UserAgent)
+	// Essential Fansly headers
+	headers := map[string]string{
+		"authorization":       c.Token,
+		"fansly-client-check": c.getFanslyClientCheck(req.URL.String()),
+		"fansly-client-id":    c.DeviceID,
+		"fansly-client-ts":    fmt.Sprintf("%d", getClientTimestamp()),
+		"fansly-session-id":   c.SessionID,
+		"origin":              "https://fansly.com",
+		"referer":             "https://fansly.com/",
+		"user-agent":          c.UserAgent,
+	}
+
+	// Apply all headers to the request
+	for key, value := range headers {
+		req.Header.Set(key, value)
+		//fmt.Printf("%s : %s ", key, value)
+	}
+	//fmt.Printf("[sendRequest] Headers: %v\n", headers)
 	return c.HTTPClient.Do(req)
 }
 
@@ -156,6 +177,7 @@ func (c *Client) GetFollowing(accountID string) ([]FollowingAccount, error) {
 
 func (c *Client) FollowAccount(modelID string) error {
 	url := fmt.Sprintf("%s/api/v1/account/%s/followers?ngsw-bypass=true", c.BaseURL, modelID)
+	//fmt.Printf("[FollowAccount] URL: %v\n", url)
 	req, err := http.NewRequest("POST", url, nil)
 	if err != nil {
 		return err
@@ -167,15 +189,13 @@ func (c *Client) FollowAccount(modelID string) error {
 	}
 	defer resp.Body.Close()
 
-	var result struct {
-		Success bool `json:"success"`
-	}
+	var result FanslyResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return err
 	}
 
 	if !result.Success {
-		return fmt.Errorf("failed to follow account")
+		return fmt.Errorf("failed to follow account (code %d): %s", result.Error.Code, result.Error.Details)
 	}
 
 	return nil
@@ -190,5 +210,7 @@ func (c *Client) getFanslyClientCheck(reqURL string) string {
 }
 
 func getClientTimestamp() int64 {
-	return time.Now().UnixNano() / int64(time.Millisecond)
+	now := time.Now().UnixNano() / int64(time.Millisecond)
+	randomValue, _ := rand.Int(rand.Reader, big.NewInt(10000))
+	return now + (5000 - randomValue.Int64())
 }
