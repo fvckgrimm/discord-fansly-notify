@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"time"
 )
 
 type Client struct {
@@ -11,6 +13,9 @@ type Client struct {
 	BaseURL    string
 	Token      string
 	UserAgent  string
+	DeviceID   string
+	SessionID  string
+	CheckKey   string
 }
 
 type AccountInfo struct {
@@ -36,18 +41,46 @@ type FollowingAccount struct {
 	AccountID string `json:"accountId"`
 }
 
-func NewClient(token, userAgent string) *Client {
-	return &Client{
+func NewClient(token, userAgent string) (*Client, error) {
+	client := &Client{
 		HTTPClient: &http.Client{},
 		BaseURL:    "https://apiv3.fansly.com",
 		Token:      token,
 		UserAgent:  userAgent,
 	}
+
+	deviceID, err := client.getDeviceID()
+	if err != nil {
+		return nil, err
+	}
+	client.DeviceID = deviceID
+
+	sessionID, err := client.getSessionID()
+	if err != nil {
+		return nil, err
+	}
+	client.SessionID = sessionID
+
+	checkKey, err := client.guessCheckKey()
+	if err != nil {
+		client.CheckKey = "oybZy8-fySzis-bubayf"
+	} else {
+		client.CheckKey = checkKey
+	}
+
+	return client, nil
 }
 
 func (c *Client) sendRequest(req *http.Request) (*http.Response, error) {
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Authorization", c.Token)
+	req.Header.Set("Origin", "https://fansly.com")
+	req.Header.Set("Referer", "https://fansly.com/")
 	req.Header.Set("User-Agent", c.UserAgent)
+	req.Header.Set("fansly-client-id", c.DeviceID)
+	req.Header.Set("fansly-client-ts", fmt.Sprintf("%d", getClientTimestamp()))
+	req.Header.Set("fansly-session-id", c.SessionID)
+	req.Header.Set("fansly-client-check", c.getFanslyClientCheck(req.URL.String()))
 	//fmt.Printf("URL: %v, TOKEN: %v, AGENT: %v", req, c.Token, c.UserAgent)
 	return c.HTTPClient.Do(req)
 }
@@ -146,4 +179,16 @@ func (c *Client) FollowAccount(modelID string) error {
 	}
 
 	return nil
+}
+
+func (c *Client) getFanslyClientCheck(reqURL string) string {
+	parsedURL, _ := url.Parse(reqURL)
+	urlPath := parsedURL.Path
+	uniqueIdentifier := fmt.Sprintf("%s_%s_%s", c.CheckKey, urlPath, c.DeviceID)
+	digest := cyrb53(uniqueIdentifier)
+	return fmt.Sprintf("%x", digest)
+}
+
+func getClientTimestamp() int64 {
+	return time.Now().UnixNano() / int64(time.Millisecond)
 }
