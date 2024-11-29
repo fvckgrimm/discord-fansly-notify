@@ -65,6 +65,40 @@ func (b *Bot) registerCommands() {
 				},
 			},
 		},
+		{
+			Name:        "toggle",
+			Description: "Toggle notifications for a model",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "username",
+					Description: "Fansly username",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "type",
+					Description: "Notification type to toggle",
+					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{
+							Name:  "Posts",
+							Value: "posts",
+						},
+						{
+							Name:  "Live",
+							Value: "live",
+						},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "enabled",
+					Description: "Enable or disable notifications",
+					Required:    true,
+				},
+			},
+		},
 	}
 
 	_, err := b.Session.ApplicationCommandBulkOverwrite(b.Session.State.User.ID, "", commands)

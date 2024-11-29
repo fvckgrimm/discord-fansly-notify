@@ -30,6 +30,8 @@ func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 		b.handleListCommand(s, i)
 	case "setliveimage":
 		b.handleSetLiveImageCommand(s, i)
+	case "toggle":
+		b.handleToggleCommand(s, i)
 	}
 }
 
@@ -143,7 +145,7 @@ func (b *Bot) respondToInteraction(s *discordgo.Session, i *discordgo.Interactio
 func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Fetch monitored users for the current guild
 	rows, err := b.DB.Query(`
-		SELECT username, notification_channel, mention_role 
+		SELECT username, notification_channel, mention_role, posts_enabled, live_enabled 
 		FROM monitored_users 
 		WHERE guild_id = ?
 	`, i.GuildID)
@@ -155,8 +157,11 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 
 	var monitoredUsers []string
 	for rows.Next() {
-		var username, channelID, roleID string
-		err := rows.Scan(&username, &channelID, &roleID)
+		var (
+			username, channelID, roleID string
+			postsEnabled, liveEnabled   bool
+		)
+		err := rows.Scan(&username, &channelID, &roleID, &postsEnabled, &liveEnabled)
 		if err != nil {
 			log.Printf("Error scanning row: %v", err)
 			continue
@@ -174,7 +179,23 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			}
 		}
 
-		userInfo := fmt.Sprintf("- %s (Channel: %s, Role: %s)", username, channelInfo, roleInfo)
+		// Create status indicators
+		postStatus := "✅"
+		if !postsEnabled {
+			postStatus = "❌"
+		}
+		liveStatus := "✅"
+		if !liveEnabled {
+			liveStatus = "❌"
+		}
+
+		userInfo := fmt.Sprintf("- %s\n  • Channel: %s\n  • Role: %s\n  • Posts: %s\n  • Live: %s",
+			username,
+			channelInfo,
+			roleInfo,
+			postStatus,
+			liveStatus,
+		)
 		monitoredUsers = append(monitoredUsers, userInfo)
 	}
 
@@ -233,6 +254,49 @@ func (b *Bot) handleSetLiveImageCommand(s *discordgo.Session, i *discordgo.Inter
 	}
 
 	b.editInteractionResponse(s, i, fmt.Sprintf("Live image for %s has been set successfully.", username))
+}
+
+func (b *Bot) handleToggleCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	options := i.ApplicationCommandData().Options
+	username := options[0].StringValue()
+	notifiType := options[1].StringValue()
+	enabled := options[2].BoolValue()
+
+	var column string
+	switch notifiType {
+	case "posts":
+		column = "posts_enabled"
+	case "live":
+		column = "live_enabled"
+	default:
+		b.respondToInteraction(s, i, "Invalid notification type")
+		return
+	}
+
+	query := fmt.Sprintf(`
+		UPDATE monitored_users
+		SET %s = ?
+		WHERE guild_id = ? AND username = ?
+		`, column)
+
+	result, err := b.DB.Exec(query, enabled, i.GuildID, username)
+	if err != nil {
+		b.respondToInteraction(s, i, fmt.Sprintf("Error updating settings: %v", err))
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username))
+		return
+	}
+
+	status := "enabled"
+	if !enabled {
+		status = "disabled"
+	}
+
+	b.respondToInteraction(s, i, fmt.Sprintf("%s notifications %s for %s", notifiType, status, username))
 }
 
 // Add this new helper function

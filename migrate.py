@@ -1,5 +1,4 @@
 import sqlite3
-# import time
 
 # Connect to the old and new databases
 old_conn = sqlite3.connect("bot-old.db")
@@ -20,6 +19,8 @@ CREATE TABLE IF NOT EXISTS monitored_users (
     avatar_location TEXT,
     avatar_location_updated_at INTEGER,
     live_image_url TEXT,
+    posts_enabled BOOLEAN DEFAULT 1,
+    live_enabled BOOLEAN DEFAULT 1,
     PRIMARY KEY (guild_id, user_id)
 )
 """)
@@ -33,13 +34,10 @@ for record in old_records:
     new_cursor.execute(
         """
     INSERT INTO monitored_users 
-    (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
-        (
-            *record,
-            None,
-        ),  # Add all existing fields from old record, plus None for live_image_url
+        (*record[:10], 1, 1),  # Take first 10 fields from record, add two boolean flags
     )
 
 # Commit the changes and close the connections

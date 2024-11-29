@@ -84,7 +84,7 @@ func (b *Bot) monitorUsers() {
 			}
 			defer tx.Rollback()
 
-			rows, err := tx.Query("SELECT guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url FROM monitored_users")
+			rows, err := tx.Query("SELECT guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled FROM monitored_users")
 			if err != nil {
 				return err
 			}
@@ -102,9 +102,11 @@ func (b *Bot) monitorUsers() {
 					AvatarLocation          string
 					AvatarLocationUpdatedAt int64
 					LiveImageURL            string
+					PostsEnabled            bool
+					LiveEnabled             bool
 				}
 
-				err := rows.Scan(&user.GuildID, &user.UserID, &user.Username, &user.NotificationChannel, &user.LastPostID, &user.LastStreamStart, &user.MentionRole, &user.AvatarLocation, &user.AvatarLocationUpdatedAt, &user.LiveImageURL)
+				err := rows.Scan(&user.GuildID, &user.UserID, &user.Username, &user.NotificationChannel, &user.LastPostID, &user.LastStreamStart, &user.MentionRole, &user.AvatarLocation, &user.AvatarLocationUpdatedAt, &user.LiveImageURL, &user.PostsEnabled, &user.LiveEnabled)
 				if err != nil {
 					log.Printf("Error scanning row: %v", err)
 					continue
@@ -136,7 +138,7 @@ func (b *Bot) monitorUsers() {
 					}
 				}
 
-				if streamInfo.Response.Stream.Status == 2 && streamInfo.Response.Stream.StartedAt > user.LastStreamStart {
+				if user.LiveEnabled && streamInfo.Response.Stream.Status == 2 && streamInfo.Response.Stream.StartedAt > user.LastStreamStart {
 					_, err = tx.Exec(`
 						UPDATE monitored_users 
 						SET last_stream_start = ? 
@@ -168,7 +170,7 @@ func (b *Bot) monitorUsers() {
 					continue
 				}
 
-				if len(postInfo) > 0 && postInfo[0].ID != user.LastPostID {
+				if user.PostsEnabled && len(postInfo) > 0 && postInfo[0].ID != user.LastPostID {
 					_, err = tx.Exec(`
                         UPDATE monitored_users 
                         SET last_post_id = ? 

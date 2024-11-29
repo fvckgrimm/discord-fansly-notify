@@ -36,6 +36,8 @@ func createTables() {
 			avatar_location TEXT,
 			avatar_location_updated_at INTEGER,
 			live_image_url	TEXT,
+			posts_enabled BOOLEAN DEFAULT 1,
+            live_enabled BOOLEAN DEFAULT 1,
 			PRIMARY KEY (guild_id, user_id)
 		)
 	`)
