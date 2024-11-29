@@ -59,38 +59,41 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 
 	avatarLocation := accountInfo.Avatar.Variants[0].Locations[0].Location
 
-	// Check if the account is already being followed
-	myAccount, err := b.APIClient.GetMyAccountInfo()
-	//fmt.Printf("%v", myAccount)
-	if err != nil {
-		b.respondToInteraction(s, i, fmt.Sprintf("Error: %v", err))
-		return
-	}
-	if myAccount.ID == "" {
-		b.respondToInteraction(s, i, "Error: Unable to retrieve account information")
-		return
-	}
+	// Check if timeline is accessible
+	timelinePosts, timelineErr := b.APIClient.GetTimelinePost(accountInfo.ID)
+	timelineAccessible := timelineErr == nil && len(timelinePosts) >= 0
 
-	following, err := b.APIClient.GetFollowing(myAccount.ID)
-	if err != nil {
-		b.respondToInteraction(s, i, fmt.Sprintf("Error: %v", err))
-		return
-	}
+	// Try to follow if timeline isn't accessible or required
+	if !timelineAccessible {
+		myAccount, err := b.APIClient.GetMyAccountInfo()
+		if err == nil && myAccount.ID != "" {
+			following, err := b.APIClient.GetFollowing(myAccount.ID)
+			if err == nil {
+				isFollowing := false
+				for _, f := range following {
+					if f.AccountID == accountInfo.ID {
+						isFollowing = true
+						break
+					}
+				}
 
-	isFollowing := false
-	for _, f := range following {
-		if f.AccountID == accountInfo.ID {
-			isFollowing = true
-			break
+				if isFollowing {
+					followErr := b.APIClient.FollowAccount(accountInfo.ID)
+					if followErr != nil {
+						log.Printf("Note: Could not follow %s: %v", username, followErr)
+						//continue since we'll try to monitor
+					}
+				}
+			}
 		}
+
+		timelinePosts, timelineErr = b.APIClient.GetTimelinePost(accountInfo.ID)
+		timelineAccessible = timelineErr == nil
 	}
 
-	if !isFollowing {
-		err = b.APIClient.FollowAccount(accountInfo.ID)
-		if err != nil {
-			b.respondToInteraction(s, i, fmt.Sprintf("Error following account: %v", err))
-			return
-		}
+	if !timelineAccessible {
+		b.respondToInteraction(s, i, fmt.Sprintf("Cannot monitor %s: Timeline not accessible", username))
+		return
 	}
 
 	// Store the monitored user in the database
