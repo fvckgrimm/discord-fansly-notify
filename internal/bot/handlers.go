@@ -99,11 +99,15 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 	}
 
 	// Store the monitored user in the database
-	_, err = b.DB.Exec(`
-        INSERT OR REPLACE INTO monitored_users 
-        (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url) 
-        VALUES (?, ?, ?, ?, '', 0, ?, ?, ?, ?)
-		`, i.GuildID, accountInfo.ID, username, channel.ID, mentionRole, avatarLocation, time.Now().Unix(), "")
+	err = b.retryDbOperation(func() error {
+		_, err := b.DB.Exec(`
+            INSERT OR REPLACE INTO monitored_users 
+            (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url) 
+            VALUES (?, ?, ?, ?, '', 0, ?, ?, ?, ?)
+            `, i.GuildID, accountInfo.ID, username, channel.ID, mentionRole, avatarLocation, time.Now().Unix(), "")
+		return err
+	})
+
 	if err != nil {
 		b.respondToInteraction(s, i, fmt.Sprintf("Error storing user: %v", err))
 		return
@@ -116,16 +120,24 @@ func (b *Bot) handleRemoveCommand(s *discordgo.Session, i *discordgo.Interaction
 	username := i.ApplicationCommandData().Options[0].StringValue()
 
 	// Remove the monitored user from the database
-	result, err := b.DB.Exec(`
-        DELETE FROM monitored_users 
-        WHERE guild_id = ? AND username = ?
-    `, i.GuildID, username)
+	var rowsAffected int64
+	err := b.retryDbOperation(func() error {
+		result, err := b.DB.Exec(`
+            DELETE FROM monitored_users 
+            WHERE guild_id = ? AND username = ?
+        `, i.GuildID, username)
+		if err != nil {
+			return err
+		}
+		rowsAffected, _ = result.RowsAffected()
+		return nil
+	})
+
 	if err != nil {
 		b.respondToInteraction(s, i, fmt.Sprintf("Error removing user: %v", err))
 		return
 	}
 
-	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
 		b.respondToInteraction(s, i, fmt.Sprintf("User %s was not found in the monitoring list", username))
 	} else {
