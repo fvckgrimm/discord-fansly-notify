@@ -59,7 +59,15 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 
-	avatarLocation := accountInfo.Avatar.Variants[0].Locations[0].Location
+	//avatarLocation := accountInfo.Avatar.Variants[0].Locations[0].Location
+	// Improve getting avatar location
+	var avatarLocation string
+	if len(accountInfo.Avatar.Variants) > 0 && len(accountInfo.Avatar.Variants[0].Locations) > 0 {
+		avatarLocation = accountInfo.Avatar.Variants[0].Locations[0].Location
+	} else {
+		log.Printf("Warning: No avatar found for user %s", username)
+		avatarLocation = ""
+	}
 
 	// Check if timeline is accessible
 	timelinePosts, timelineErr := b.APIClient.GetTimelinePost(accountInfo.ID)
@@ -102,8 +110,8 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 	err = b.retryDbOperation(func() error {
 		_, err := b.DB.Exec(`
             INSERT OR REPLACE INTO monitored_users 
-            (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url) 
-            VALUES (?, ?, ?, ?, '', 0, ?, ?, ?, ?)
+            (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled) 
+            VALUES (?, ?, ?, ?, '', 0, ?, ?, ?, ?, 1, 1)
             `, i.GuildID, accountInfo.ID, username, channel.ID, mentionRole, avatarLocation, time.Now().Unix(), "")
 		return err
 	})
