@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/fvckgrimm/discord-fansly-notify/internal/config"
 )
 
 func (b *Bot) ready(s *discordgo.Session, event *discordgo.Ready) {
@@ -44,6 +45,18 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 		if role := options[2].RoleValue(s, i.GuildID); role != nil {
 			mentionRole = role.ID
 		}
+	}
+
+	// Log What Creators are being monitored to better handle potential issues
+	logMessage := fmt.Sprintf("`[ %s ]` %s:\n`Requested Creator Name:` **%s**\n----------",
+		time.Now().Format("2006-01-02 15:04:05"),
+		i.Member.User.Username,
+		username,
+	)
+
+	_, err := s.ChannelMessageSend(config.LogChannelID, logMessage)
+	if err != nil {
+		log.Printf("Failed to send log message: %v", err)
 	}
 
 	accountInfo, err := b.APIClient.GetAccountInfo(username)

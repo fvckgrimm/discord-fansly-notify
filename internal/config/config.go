@@ -13,6 +13,7 @@ var (
 	UserAgent    string
 	AppID        string
 	PublicKey    string
+	LogChannelID string
 )
 
 func Load() {
@@ -26,8 +27,9 @@ func Load() {
 	UserAgent = os.Getenv("USER_AGENT")
 	AppID = os.Getenv("APP_ID")
 	PublicKey = os.Getenv("PUBLIC_KEY")
+	LogChannelID = os.Getenv("LOG_CHANNEL_ID")
 
-	if DiscordToken == "" || FanslyToken == "" || UserAgent == "" || AppID == "" || PublicKey == "" {
+	if DiscordToken == "" || FanslyToken == "" || UserAgent == "" || AppID == "" || PublicKey == "" || LogChannelID == "" {
 		log.Fatal("Missing required environment variables")
 	}
 }
