@@ -160,7 +160,26 @@ func (b *Bot) monitorUsers() {
 						Embed:   embedMsg,
 					})
 					if err != nil {
-						log.Printf("Error sending live stream notification: %v", err)
+						guild, _ := b.Session.Guild(user.GuildID)
+						guildName := "Unknown Server"
+						if guild != nil {
+							guildName = guild.Name
+						}
+
+						channel, _ := b.Session.Channel(user.NotificationChannel)
+						channelName := "Unknown Channel"
+						if channel != nil {
+							channelName = channel.Name
+						}
+
+						log.Printf("Error sending live stream notification for %s | Server: %s (%s) | Channel: %s (%s) | Error: %v",
+							user.Username,
+							guildName,
+							user.GuildID,
+							channelName,
+							user.NotificationChannel,
+							err,
+						)
 					}
 				}
 
@@ -198,7 +217,26 @@ func (b *Bot) monitorUsers() {
 						Embed:   embedMsg,
 					})
 					if err != nil {
-						log.Printf("Error sending post notification: %v", err)
+						guild, _ := b.Session.Guild(user.GuildID)
+						guildName := "Unknown Server"
+						if guild != nil {
+							guildName = guild.Name
+						}
+
+						channel, _ := b.Session.Channel(user.NotificationChannel)
+						channelName := "Unknown Channel"
+						if channel != nil {
+							channelName = channel.Name
+						}
+
+						log.Printf("Error sending post notification for %s | Server: %s (%s) | Channel: %s (%s) | Error: %v",
+							user.Username,
+							guildName,
+							user.GuildID,
+							channelName,
+							user.NotificationChannel,
+							err,
+						)
 					}
 				} else if len(postInfo) == 0 {
 					//log.Printf("No new posts found for user %s", user.Username)

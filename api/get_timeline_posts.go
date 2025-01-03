@@ -70,6 +70,8 @@ func (c *Client) GetTimelinePost(modelID string) ([]Post, error) {
 		return nil, err
 	}
 
+	//fmt.Printf("[INFO] [ %s Response ]: %v", modelID, timelineResp)
+
 	if !hasTimelineAccess(timelineResp) {
 		return nil, fmt.Errorf("no timeline access for user %s", modelID)
 	}
