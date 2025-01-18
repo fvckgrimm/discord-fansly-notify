@@ -33,6 +33,8 @@ func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 		b.handleSetLiveImageCommand(s, i)
 	case "toggle":
 		b.handleToggleCommand(s, i)
+	case "setchannel":
+		b.handleSetChannelCommand(s, i)
 	}
 }
 
@@ -100,7 +102,7 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 					}
 				}
 
-				if isFollowing {
+				if !isFollowing {
 					followErr := b.APIClient.FollowAccount(accountInfo.ID)
 					if followErr != nil {
 						log.Printf("Note: Could not follow %s: %v", username, followErr)
@@ -121,11 +123,11 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 
 	// Store the monitored user in the database
 	err = b.retryDbOperation(func() error {
-		_, err := b.DB.Exec(`
-            INSERT OR REPLACE INTO monitored_users 
-            (guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled) 
-            VALUES (?, ?, ?, ?, '', 0, ?, ?, ?, ?, 1, 1)
-            `, i.GuildID, accountInfo.ID, username, channel.ID, mentionRole, avatarLocation, time.Now().Unix(), "")
+		_, err = b.DB.Exec(`
+			INSERT OR REPLACE INTO monitored_users 
+			(guild_id, user_id, username, notification_channel, post_notification_channel, live_notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled) 
+			VALUES (?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?, 1, 1)
+		`, i.GuildID, accountInfo.ID, username, channel.ID, channel.ID, channel.ID, mentionRole, avatarLocation, time.Now().Unix(), "")
 		return err
 	})
 
@@ -330,6 +332,44 @@ func (b *Bot) handleToggleCommand(s *discordgo.Session, i *discordgo.Interaction
 	}
 
 	b.respondToInteraction(s, i, fmt.Sprintf("%s notifications %s for %s", notifiType, status, username))
+}
+
+func (b *Bot) handleSetChannelCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	options := i.ApplicationCommandData().Options
+	username := options[0].StringValue()
+	notifType := options[1].StringValue()
+	channel := options[2].ChannelValue(s)
+
+	var columnName string
+	switch notifType {
+	case "posts":
+		columnName = "post_notification_channel"
+	case "live":
+		columnName = "live_notification_channel"
+	default:
+		b.respondToInteraction(s, i, "Invalid notification type")
+		return
+	}
+
+	query := fmt.Sprintf(`
+        UPDATE monitored_users 
+        SET %s = ? 
+        WHERE guild_id = ? AND username = ?
+    `, columnName)
+
+	result, err := b.DB.Exec(query, channel.ID, i.GuildID, username)
+	if err != nil {
+		b.respondToInteraction(s, i, fmt.Sprintf("Error updating channel: %v", err))
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username))
+		return
+	}
+
+	b.respondToInteraction(s, i, fmt.Sprintf("Successfully set %s notification channel for %s to %s", notifType, username, channel.Mention()))
 }
 
 // Add this new helper function

@@ -84,7 +84,7 @@ func (b *Bot) monitorUsers() {
 			}
 			defer tx.Rollback()
 
-			rows, err := tx.Query("SELECT guild_id, user_id, username, notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled FROM monitored_users")
+			rows, err := tx.Query("SELECT guild_id, user_id, username, notification_channel, post_notification_channel, live_notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled FROM monitored_users")
 			if err != nil {
 				return err
 			}
@@ -96,6 +96,8 @@ func (b *Bot) monitorUsers() {
 					UserID                  string
 					Username                string
 					NotificationChannel     string
+					PostNotificationChannel string
+					LiveNotificationChannel string
 					LastPostID              string
 					LastStreamStart         int64
 					MentionRole             string
@@ -106,7 +108,7 @@ func (b *Bot) monitorUsers() {
 					LiveEnabled             bool
 				}
 
-				err := rows.Scan(&user.GuildID, &user.UserID, &user.Username, &user.NotificationChannel, &user.LastPostID, &user.LastStreamStart, &user.MentionRole, &user.AvatarLocation, &user.AvatarLocationUpdatedAt, &user.LiveImageURL, &user.PostsEnabled, &user.LiveEnabled)
+				err := rows.Scan(&user.GuildID, &user.UserID, &user.Username, &user.NotificationChannel, &user.PostNotificationChannel, &user.LiveNotificationChannel, &user.LastPostID, &user.LastStreamStart, &user.MentionRole, &user.AvatarLocation, &user.AvatarLocationUpdatedAt, &user.LiveImageURL, &user.PostsEnabled, &user.LiveEnabled)
 				if err != nil {
 					log.Printf("Error scanning row: %v", err)
 					continue
@@ -155,7 +157,12 @@ func (b *Bot) monitorUsers() {
 						mention = fmt.Sprintf("<@&%s>", user.MentionRole)
 					}
 
-					_, err = b.Session.ChannelMessageSendComplex(user.NotificationChannel, &discordgo.MessageSend{
+					targetChannel := user.LiveNotificationChannel
+					if targetChannel == "" {
+						targetChannel = user.NotificationChannel
+					}
+
+					_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
 						Content: mention,
 						Embed:   embedMsg,
 					})
@@ -212,7 +219,12 @@ func (b *Bot) monitorUsers() {
 						mention = fmt.Sprintf("<@&%s>", user.MentionRole)
 					}
 
-					_, err = b.Session.ChannelMessageSendComplex(user.NotificationChannel, &discordgo.MessageSend{
+					targetChannel := user.PostNotificationChannel
+					if targetChannel == "" {
+						targetChannel = user.NotificationChannel
+					}
+
+					_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
 						Content: mention,
 						Embed:   embedMsg,
 					})
