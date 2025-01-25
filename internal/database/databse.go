@@ -9,7 +9,7 @@ import (
 
 var DB *sql.DB
 
-const currentVersion = 2
+const currentVersion = 3
 
 func Init() {
 	var err error
@@ -47,6 +47,7 @@ func runMigrations(currentDBVersion int) {
 	migrations := []func(*sql.DB) error{
 		migrateToV1,
 		migrateToV2,
+		migrateToV3,
 		// Add new migrations here
 	}
 
@@ -122,6 +123,41 @@ func migrateToV2(db *sql.DB) error {
         UPDATE monitored_users 
         SET post_notification_channel = notification_channel,
             live_notification_channel = notification_channel
+    `)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func migrateToV3(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+        ALTER TABLE monitored_users 
+        ADD COLUMN post_mention_role TEXT;
+    `)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(`
+        ALTER TABLE monitored_users 
+        ADD COLUMN live_mention_role TEXT;
+    `)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(`
+        UPDATE monitored_users 
+        SET post_mention_role = mention_role,
+            live_mention_role = mention_role
     `)
 	if err != nil {
 		return err

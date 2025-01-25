@@ -84,7 +84,7 @@ func (b *Bot) monitorUsers() {
 			}
 			defer tx.Rollback()
 
-			rows, err := tx.Query("SELECT guild_id, user_id, username, notification_channel, post_notification_channel, live_notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled FROM monitored_users")
+			rows, err := tx.Query("SELECT guild_id, user_id, username, notification_channel, post_notification_channel, live_notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled, live_mention_role, post_mention_role FROM monitored_users")
 			if err != nil {
 				return err
 			}
@@ -106,9 +106,11 @@ func (b *Bot) monitorUsers() {
 					LiveImageURL            string
 					PostsEnabled            bool
 					LiveEnabled             bool
+					LiveMentionRole         string
+					PostMentionRole         string
 				}
 
-				err := rows.Scan(&user.GuildID, &user.UserID, &user.Username, &user.NotificationChannel, &user.PostNotificationChannel, &user.LiveNotificationChannel, &user.LastPostID, &user.LastStreamStart, &user.MentionRole, &user.AvatarLocation, &user.AvatarLocationUpdatedAt, &user.LiveImageURL, &user.PostsEnabled, &user.LiveEnabled)
+				err := rows.Scan(&user.GuildID, &user.UserID, &user.Username, &user.NotificationChannel, &user.PostNotificationChannel, &user.LiveNotificationChannel, &user.LastPostID, &user.LastStreamStart, &user.MentionRole, &user.AvatarLocation, &user.AvatarLocationUpdatedAt, &user.LiveImageURL, &user.PostsEnabled, &user.LiveEnabled, &user.LiveMentionRole, &user.PostMentionRole)
 				if err != nil {
 					log.Printf("Error scanning row: %v", err)
 					continue
@@ -153,8 +155,8 @@ func (b *Bot) monitorUsers() {
 					embedMsg := embed.CreateLiveStreamEmbed(user.Username, streamInfo, user.AvatarLocation, user.LiveImageURL)
 
 					mention := "@everyone"
-					if user.MentionRole != "" {
-						mention = fmt.Sprintf("<@&%s>", user.MentionRole)
+					if user.LiveMentionRole != "" {
+						mention = fmt.Sprintf("<@&%s>", user.LiveMentionRole)
 					}
 
 					targetChannel := user.LiveNotificationChannel
@@ -215,8 +217,8 @@ func (b *Bot) monitorUsers() {
 					embedMsg := embed.CreatePostEmbed(user.Username, postInfo[0], user.AvatarLocation, postMedia)
 
 					mention := "@everyone"
-					if user.MentionRole != "" {
-						mention = fmt.Sprintf("<@&%s>", user.MentionRole)
+					if user.PostMentionRole != "" {
+						mention = fmt.Sprintf("<@&%s>", user.PostMentionRole)
 					}
 
 					targetChannel := user.PostNotificationChannel

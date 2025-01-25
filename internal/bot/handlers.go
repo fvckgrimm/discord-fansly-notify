@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"strings"
@@ -35,6 +36,10 @@ func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 		b.handleToggleCommand(s, i)
 	case "setchannel":
 		b.handleSetChannelCommand(s, i)
+	case "setpostmention":
+		b.handleSetPostMentionCommand(s, i)
+	case "setlivemention":
+		b.handleSetLiveMentionCommand(s, i)
 	}
 }
 
@@ -125,9 +130,9 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 	err = b.retryDbOperation(func() error {
 		_, err = b.DB.Exec(`
 			INSERT OR REPLACE INTO monitored_users 
-			(guild_id, user_id, username, notification_channel, post_notification_channel, live_notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled) 
-			VALUES (?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?, 1, 1)
-		`, i.GuildID, accountInfo.ID, username, channel.ID, channel.ID, channel.ID, mentionRole, avatarLocation, time.Now().Unix(), "")
+			(guild_id, user_id, username, notification_channel, post_notification_channel, live_notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled, live_mention_role, post_mention_role) 
+			VALUES (?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?, 1, 1, ?, ?)
+		`, i.GuildID, accountInfo.ID, username, channel.ID, channel.ID, channel.ID, mentionRole, avatarLocation, time.Now().Unix(), "", mentionRole, mentionRole)
 		return err
 	})
 
@@ -180,7 +185,7 @@ func (b *Bot) respondToInteraction(s *discordgo.Session, i *discordgo.Interactio
 func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Fetch monitored users for the current guild
 	rows, err := b.DB.Query(`
-		SELECT username, notification_channel, mention_role, posts_enabled, live_enabled 
+		SELECT username, notification_channel, posts_enabled, live_enabled, live_mention_role, post_mention_role
 		FROM monitored_users 
 		WHERE guild_id = ?
 	`, i.GuildID)
@@ -193,10 +198,10 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	var monitoredUsers []string
 	for rows.Next() {
 		var (
-			username, channelID, roleID string
-			postsEnabled, liveEnabled   bool
+			username, channelID, postMentionRole, liveMentionRole string
+			postsEnabled, liveEnabled                             bool
 		)
-		err := rows.Scan(&username, &channelID, &roleID, &postsEnabled, &liveEnabled)
+		err := rows.Scan(&username, &channelID, &postsEnabled, &liveEnabled, &liveMentionRole, &postMentionRole)
 		if err != nil {
 			log.Printf("Error scanning row: %v", err)
 			continue
@@ -204,15 +209,8 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 
 		channelInfo := fmt.Sprintf("<#%s>", channelID)
 
-		roleInfo := "No role"
-		if roleID != "" {
-			role, err := s.State.Role(i.GuildID, roleID)
-			if err != nil {
-				log.Printf("Error fetching role: %v", err)
-			} else {
-				roleInfo = role.Name
-			}
-		}
+		roleInfoPost := getRoleName(s, i.GuildID, postMentionRole)
+		roleInfoLive := getRoleName(s, i.GuildID, liveMentionRole)
 
 		// Create status indicators
 		postStatus := "✅"
@@ -224,10 +222,11 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			liveStatus = "❌"
 		}
 
-		userInfo := fmt.Sprintf("- %s\n  • Channel: %s\n  • Role: %s\n  • Posts: %s\n  • Live: %s",
+		userInfo := fmt.Sprintf("- %s\n  • Channel: %s\n  • Live Role: %s\n • Post Role: %s\n  • Posts: %s\n  • Live: %s",
 			username,
 			channelInfo,
-			roleInfo,
+			roleInfoPost,
+			roleInfoLive,
 			postStatus,
 			liveStatus,
 		)
@@ -370,6 +369,81 @@ func (b *Bot) handleSetChannelCommand(s *discordgo.Session, i *discordgo.Interac
 	}
 
 	b.respondToInteraction(s, i, fmt.Sprintf("Successfully set %s notification channel for %s to %s", notifType, username, channel.Mention()))
+}
+
+func (b *Bot) handleSetPostMentionCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	options := i.ApplicationCommandData().Options
+	username := options[0].StringValue()
+	var roleID string
+	if len(options) > 1 {
+		role := options[1].RoleValue(s, i.GuildID)
+		if role != nil {
+			roleID = role.ID
+		}
+	}
+
+	result, err := b.DB.Exec(`
+        UPDATE monitored_users 
+        SET post_mention_role = ? 
+        WHERE guild_id = ? AND username = ?
+    `, roleID, i.GuildID, username)
+
+	if handleUpdateResponse(b, s, i, err, result, "post mention role", username, roleID) {
+		return
+	}
+}
+
+func (b *Bot) handleSetLiveMentionCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	options := i.ApplicationCommandData().Options
+	username := options[0].StringValue()
+	var roleID string
+	if len(options) > 1 {
+		role := options[1].RoleValue(s, i.GuildID)
+		if role != nil {
+			roleID = role.ID
+		}
+	}
+
+	result, err := b.DB.Exec(`
+        UPDATE monitored_users 
+        SET live_mention_role = ? 
+        WHERE guild_id = ? AND username = ?
+    `, roleID, i.GuildID, username)
+
+	if handleUpdateResponse(b, s, i, err, result, "live mention role", username, roleID) {
+		return
+	}
+}
+
+func handleUpdateResponse(b *Bot, s *discordgo.Session, i *discordgo.InteractionCreate, err error, result sql.Result, roleType, username, roleID string) bool {
+	if err != nil {
+		b.respondToInteraction(s, i, fmt.Sprintf("Error updating %s: %v", roleType, err))
+		return true
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username))
+		return true
+	}
+
+	message := fmt.Sprintf("%s for %s has been cleared.", roleType, username)
+	if roleID != "" {
+		message = fmt.Sprintf("%s for %s set to <@&%s>", roleType, username, roleID)
+	}
+	b.respondToInteraction(s, i, message)
+	return false
+}
+
+func getRoleName(s *discordgo.Session, guildID, roleID string) string {
+	if roleID == "" {
+		return "No role"
+	}
+	role, err := s.State.Role(guildID, roleID)
+	if err != nil {
+		return "Unknown role"
+	}
+	return role.Name
 }
 
 // Add this new helper function

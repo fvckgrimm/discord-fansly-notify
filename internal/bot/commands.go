@@ -133,6 +133,42 @@ func (b *Bot) registerCommands() {
 				},
 			},
 		},
+		{
+			Name:        "setpostmention",
+			Description: "Set role to mention for post notifications",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "username",
+					Description: "Fansly username",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "role",
+					Description: "Role to mention (optional)",
+					Required:    false,
+				},
+			},
+		},
+		{
+			Name:        "setlivemention",
+			Description: "Set role to mention for live notifications",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "username",
+					Description: "Fansly username",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionRole,
+					Name:        "role",
+					Description: "Role to mention (optional)",
+					Required:    false,
+				},
+			},
+		},
 	}
 
 	_, err := b.Session.ApplicationCommandBulkOverwrite(b.Session.State.User.ID, "", commands)
