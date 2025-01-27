@@ -4,12 +4,15 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/fvckgrimm/discord-fansly-notify/internal/config"
 )
+
+var tokenRegex = regexp.MustCompile(`[A-Za-z0-9]{30,}`)
 
 func (b *Bot) ready(s *discordgo.Session, event *discordgo.Ready) {
 	log.Println("Bot is ready")
@@ -19,7 +22,7 @@ func (b *Bot) ready(s *discordgo.Session, event *discordgo.Ready) {
 
 func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if !b.hasAdminOrModPermissions(s, i) {
-		b.respondToInteraction(s, i, "You do not have permission to use this command.")
+		b.respondToInteraction(s, i, "You do not have permission to use this command.", false)
 		return
 	}
 
@@ -46,6 +49,12 @@ func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
 	username := options[0].StringValue()
+
+	if tokenRegex.MatchString(username) {
+		b.respondToInteraction(s, i, "Error: Username appears to contain a token. Please provide a valid username.", true)
+		return
+	}
+
 	channel := options[1].ChannelValue(s)
 	var mentionRole string
 	if len(options) > 2 {
@@ -69,13 +78,13 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 	accountInfo, err := b.APIClient.GetAccountInfo(username)
 	if err != nil {
 		log.Printf("Error getting account info for %s: %v", username, err)
-		b.respondToInteraction(s, i, fmt.Sprintf("Error: %v", err))
+		b.respondToInteraction(s, i, fmt.Sprintf("Error: %v", err), false)
 		return
 	}
 
 	if accountInfo == nil /*|| accountInfo.Avatar.Locations == nil || len(accountInfo.Avatar.Variants) == 0 || len(accountInfo.Avatar.Variants[0].Locations) == 0*/ {
 		log.Printf("Invalid account info structure for %s", username)
-		b.respondToInteraction(s, i, "Error: Invalid account info structure")
+		b.respondToInteraction(s, i, "Error: Invalid account info structure", false)
 		return
 	}
 
@@ -122,7 +131,7 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 	}
 
 	if !timelineAccessible {
-		b.respondToInteraction(s, i, fmt.Sprintf("Cannot monitor %s: Timeline not accessible", username))
+		b.respondToInteraction(s, i, fmt.Sprintf("Cannot monitor %s: Timeline not accessible", username), false)
 		return
 	}
 
@@ -137,11 +146,11 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 	})
 
 	if err != nil {
-		b.respondToInteraction(s, i, fmt.Sprintf("Error storing user: %v", err))
+		b.respondToInteraction(s, i, fmt.Sprintf("Error storing user: %v", err), false)
 		return
 	}
 
-	b.respondToInteraction(s, i, fmt.Sprintf("Added %s to monitoring list", username))
+	b.respondToInteraction(s, i, fmt.Sprintf("Added %s to monitoring list", username), false)
 }
 
 func (b *Bot) handleRemoveCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -162,22 +171,28 @@ func (b *Bot) handleRemoveCommand(s *discordgo.Session, i *discordgo.Interaction
 	})
 
 	if err != nil {
-		b.respondToInteraction(s, i, fmt.Sprintf("Error removing user: %v", err))
+		b.respondToInteraction(s, i, fmt.Sprintf("Error removing user: %v", err), false)
 		return
 	}
 
 	if rowsAffected == 0 {
-		b.respondToInteraction(s, i, fmt.Sprintf("User %s was not found in the monitoring list", username))
+		b.respondToInteraction(s, i, fmt.Sprintf("User %s was not found in the monitoring list", username), false)
 	} else {
-		b.respondToInteraction(s, i, fmt.Sprintf("Removed %s from monitoring list", username))
+		b.respondToInteraction(s, i, fmt.Sprintf("Removed %s from monitoring list", username), false)
 	}
 }
 
-func (b *Bot) respondToInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
+func (b *Bot) respondToInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, content string, ephemeral bool) {
+	flags := discordgo.MessageFlags(0)
+	if ephemeral {
+		flags = discordgo.MessageFlagsEphemeral
+	}
+
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Content: content,
+			Flags:   flags,
 		},
 	})
 }
@@ -190,7 +205,7 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		WHERE guild_id = ?
 	`, i.GuildID)
 	if err != nil {
-		b.respondToInteraction(s, i, fmt.Sprintf("Error fetching monitored users: %v", err))
+		b.respondToInteraction(s, i, fmt.Sprintf("Error fetching monitored users: %v", err), false)
 		return
 	}
 	defer rows.Close()
@@ -234,12 +249,12 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	}
 
 	if len(monitoredUsers) == 0 {
-		b.respondToInteraction(s, i, "No models are currently being monitored.")
+		b.respondToInteraction(s, i, "No models are currently being monitored.", false)
 		return
 	}
 
 	response := "Monitored models:\n" + strings.Join(monitoredUsers, "\n")
-	b.respondToInteraction(s, i, response)
+	b.respondToInteraction(s, i, response, false)
 }
 
 func (b *Bot) handleSetLiveImageCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -303,7 +318,7 @@ func (b *Bot) handleToggleCommand(s *discordgo.Session, i *discordgo.Interaction
 	case "live":
 		column = "live_enabled"
 	default:
-		b.respondToInteraction(s, i, "Invalid notification type")
+		b.respondToInteraction(s, i, "Invalid notification type", false)
 		return
 	}
 
@@ -315,13 +330,13 @@ func (b *Bot) handleToggleCommand(s *discordgo.Session, i *discordgo.Interaction
 
 	result, err := b.DB.Exec(query, enabled, i.GuildID, username)
 	if err != nil {
-		b.respondToInteraction(s, i, fmt.Sprintf("Error updating settings: %v", err))
+		b.respondToInteraction(s, i, fmt.Sprintf("Error updating settings: %v", err), false)
 		return
 	}
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username))
+		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username), false)
 		return
 	}
 
@@ -330,7 +345,7 @@ func (b *Bot) handleToggleCommand(s *discordgo.Session, i *discordgo.Interaction
 		status = "disabled"
 	}
 
-	b.respondToInteraction(s, i, fmt.Sprintf("%s notifications %s for %s", notifiType, status, username))
+	b.respondToInteraction(s, i, fmt.Sprintf("%s notifications %s for %s", notifiType, status, username), false)
 }
 
 func (b *Bot) handleSetChannelCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -346,7 +361,7 @@ func (b *Bot) handleSetChannelCommand(s *discordgo.Session, i *discordgo.Interac
 	case "live":
 		columnName = "live_notification_channel"
 	default:
-		b.respondToInteraction(s, i, "Invalid notification type")
+		b.respondToInteraction(s, i, "Invalid notification type", false)
 		return
 	}
 
@@ -358,17 +373,17 @@ func (b *Bot) handleSetChannelCommand(s *discordgo.Session, i *discordgo.Interac
 
 	result, err := b.DB.Exec(query, channel.ID, i.GuildID, username)
 	if err != nil {
-		b.respondToInteraction(s, i, fmt.Sprintf("Error updating channel: %v", err))
+		b.respondToInteraction(s, i, fmt.Sprintf("Error updating channel: %v", err), false)
 		return
 	}
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username))
+		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username), false)
 		return
 	}
 
-	b.respondToInteraction(s, i, fmt.Sprintf("Successfully set %s notification channel for %s to %s", notifType, username, channel.Mention()))
+	b.respondToInteraction(s, i, fmt.Sprintf("Successfully set %s notification channel for %s to %s", notifType, username, channel.Mention()), false)
 }
 
 func (b *Bot) handleSetPostMentionCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -417,13 +432,13 @@ func (b *Bot) handleSetLiveMentionCommand(s *discordgo.Session, i *discordgo.Int
 
 func handleUpdateResponse(b *Bot, s *discordgo.Session, i *discordgo.InteractionCreate, err error, result sql.Result, roleType, username, roleID string) bool {
 	if err != nil {
-		b.respondToInteraction(s, i, fmt.Sprintf("Error updating %s: %v", roleType, err))
+		b.respondToInteraction(s, i, fmt.Sprintf("Error updating %s: %v", roleType, err), false)
 		return true
 	}
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username))
+		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username), false)
 		return true
 	}
 
@@ -431,7 +446,7 @@ func handleUpdateResponse(b *Bot, s *discordgo.Session, i *discordgo.Interaction
 	if roleID != "" {
 		message = fmt.Sprintf("%s for %s set to <@&%s>", roleType, username, roleID)
 	}
-	b.respondToInteraction(s, i, message)
+	b.respondToInteraction(s, i, message, false)
 	return false
 }
 
