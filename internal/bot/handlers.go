@@ -219,7 +219,7 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			postsEnabled, liveEnabled                               bool
 		)
 		err := rows.Scan(&username, &notificationChannel, &postChannel, &liveChannel,
-			&postsEnabled, &liveEnabled, &liveMentionRole, &postMentionRole)
+			&postsEnabled, &liveEnabled, &postMentionRole, &liveMentionRole)
 		if err != nil {
 			log.Printf("Error scanning row: %v", err)
 			continue
