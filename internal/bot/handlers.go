@@ -200,10 +200,11 @@ func (b *Bot) respondToInteraction(s *discordgo.Session, i *discordgo.Interactio
 func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Fetch monitored users for the current guild
 	rows, err := b.DB.Query(`
-		SELECT username, notification_channel, posts_enabled, live_enabled, live_mention_role, post_mention_role
-		FROM monitored_users 
-		WHERE guild_id = ?
-	`, i.GuildID)
+        SELECT username, notification_channel, post_notification_channel, live_notification_channel, 
+               posts_enabled, live_enabled, live_mention_role, post_mention_role
+        FROM monitored_users 
+        WHERE guild_id = ?
+    `, i.GuildID)
 	if err != nil {
 		b.respondToInteraction(s, i, fmt.Sprintf("Error fetching monitored users: %v", err), false)
 		return
@@ -213,16 +214,19 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	var monitoredUsers []string
 	for rows.Next() {
 		var (
-			username, channelID, postMentionRole, liveMentionRole string
-			postsEnabled, liveEnabled                             bool
+			username, notificationChannel, postChannel, liveChannel string
+			postMentionRole, liveMentionRole                        string
+			postsEnabled, liveEnabled                               bool
 		)
-		err := rows.Scan(&username, &channelID, &postsEnabled, &liveEnabled, &liveMentionRole, &postMentionRole)
+		err := rows.Scan(&username, &notificationChannel, &postChannel, &liveChannel,
+			&postsEnabled, &liveEnabled, &liveMentionRole, &postMentionRole)
 		if err != nil {
 			log.Printf("Error scanning row: %v", err)
 			continue
 		}
 
-		channelInfo := fmt.Sprintf("<#%s>", channelID)
+		postChannelInfo := fmt.Sprintf("<#%s>", postChannel)
+		liveChannelInfo := fmt.Sprintf("<#%s>", liveChannel)
 
 		roleInfoPost := getRoleName(s, i.GuildID, postMentionRole)
 		roleInfoLive := getRoleName(s, i.GuildID, liveMentionRole)
@@ -237,11 +241,12 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			liveStatus = "❌"
 		}
 
-		userInfo := fmt.Sprintf("- %s\n  • Channel: %s\n  • Live Role: %s\n • Post Role: %s\n  • Posts: %s\n  • Live: %s",
+		userInfo := fmt.Sprintf("- %s\n  • Post Channel: %s\n  • Live Channel: %s\n  • Live Role: %s\n  • Post Role: %s\n  • Posts: %s\n  • Live: %s",
 			username,
-			channelInfo,
-			roleInfoPost,
+			postChannelInfo,
+			liveChannelInfo,
 			roleInfoLive,
+			roleInfoPost,
 			postStatus,
 			liveStatus,
 		)
