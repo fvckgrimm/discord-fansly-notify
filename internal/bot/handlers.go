@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -131,7 +132,98 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 	}
 
 	if !timelineAccessible {
-		b.respondToInteraction(s, i, fmt.Sprintf("Cannot monitor %s: Timeline not accessible", username), false)
+		// Create confirmation message
+		confirmMsg := fmt.Sprintf("Cannot access timeline for %s. Would you like to add this account for live notifications only? "+
+			"React with ✅ to add for live notifications only, or ❌ to cancel.\n"+
+			"This confirmation will expire in 60 seconds.", username)
+
+		// Send confirmation message
+		msg, err := s.ChannelMessageSend(i.ChannelID, confirmMsg)
+		if err != nil {
+			b.respondToInteraction(s, i, "Error sending confirmation message", true)
+			return
+		}
+
+		// Add reactions
+		s.MessageReactionAdd(i.ChannelID, msg.ID, "✅")
+		s.MessageReactionAdd(i.ChannelID, msg.ID, "❌")
+
+		// Acknowledge the command interaction
+		b.respondToInteraction(s, i, "Please respond to the confirmation message.", true)
+
+		// Set up a timeout context
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		// Create a channel for the reaction response
+		reactionChan := make(chan string)
+
+		// Add temporary handler for reactions
+		handlerID := s.AddHandler(func(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
+			// Only process reactions to our message
+			if r.MessageID != msg.ID || r.UserID == s.State.User.ID {
+				return
+			}
+
+			// Only process reactions from the command initiator
+			if r.UserID != i.Member.User.ID {
+				return
+			}
+
+			switch r.Emoji.Name {
+			case "✅", "❌":
+				select {
+				case reactionChan <- r.Emoji.Name:
+				default:
+				}
+			}
+		})
+
+		// Wait for either a reaction or timeout
+		var reaction string
+		select {
+		case reaction = <-reactionChan:
+			// Process the reaction
+		case <-ctx.Done():
+			// Timeout occurred
+			s.ChannelMessageEdit(i.ChannelID, msg.ID, "Confirmation timed out. Please try the command again.")
+			s.ChannelMessageDelete(i.ChannelID, msg.ID)
+			handlerID()
+			return
+		}
+
+		// Remove the handler
+		handlerID()
+
+		// Process the reaction
+		switch reaction {
+		case "✅":
+			// Store user with posts disabled
+			err := b.retryDbOperation(func() error {
+				_, err := b.DB.Exec(`
+                    INSERT OR REPLACE INTO monitored_users 
+                    (guild_id, user_id, username, notification_channel, post_notification_channel, live_notification_channel, 
+                    last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, 
+                    live_image_url, posts_enabled, live_enabled, live_mention_role, post_mention_role) 
+                    VALUES (?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?, 0, 1, ?, ?)
+                `, i.GuildID, accountInfo.ID, username, channel.ID, channel.ID, channel.ID,
+					mentionRole, avatarLocation, time.Now().Unix(), "", mentionRole, mentionRole)
+				return err
+			})
+
+			if err != nil {
+				s.ChannelMessageSend(i.ChannelID, fmt.Sprintf("Error storing user: %v", err))
+				return
+			}
+			s.ChannelMessageEdit(i.ChannelID, msg.ID, fmt.Sprintf("Added %s to monitoring list (live notifications only)", username))
+
+		case "❌":
+			s.ChannelMessageEdit(i.ChannelID, msg.ID, "Operation cancelled.")
+		}
+
+		// Delete the message after a short delay
+		time.Sleep(5 * time.Second)
+		s.ChannelMessageDelete(i.ChannelID, msg.ID)
 		return
 	}
 
@@ -245,8 +337,8 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			username,
 			postChannelInfo,
 			liveChannelInfo,
-			roleInfoLive,
 			roleInfoPost,
+			roleInfoLive,
 			postStatus,
 			liveStatus,
 		)
