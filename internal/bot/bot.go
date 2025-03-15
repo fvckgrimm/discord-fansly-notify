@@ -116,13 +116,6 @@ func (b *Bot) monitorUsers() {
 					continue
 				}
 
-				// Check for new posts and live streams
-				streamInfo, err := b.APIClient.GetStreamInfo(user.UserID)
-				if err != nil {
-					log.Printf("Error fetching stream info: %v", err)
-					continue
-				}
-
 				// Check if avatar URL needs refreshing (e.g., older than 6 days)
 				if time.Now().Unix()-user.AvatarLocationUpdatedAt > 6*24*60*60 {
 					newAvatarLocation, err := b.refreshAvatarURL(user.Username)
@@ -142,119 +135,126 @@ func (b *Bot) monitorUsers() {
 					}
 				}
 
-				if user.LiveEnabled && streamInfo.Response.Stream.Status == 2 && streamInfo.Response.Stream.StartedAt > user.LastStreamStart {
-					_, err = tx.Exec(`
-						UPDATE monitored_users 
-						SET last_stream_start = ? 
-						WHERE guild_id = ? AND user_id = ?
-					`, streamInfo.Response.Stream.StartedAt, user.GuildID, user.UserID)
+				// Only check for live streams if LiveEnabled is true
+				if user.LiveEnabled {
+					streamInfo, err := b.APIClient.GetStreamInfo(user.UserID)
 					if err != nil {
-						return err
-					}
-
-					embedMsg := embed.CreateLiveStreamEmbed(user.Username, streamInfo, user.AvatarLocation, user.LiveImageURL)
-
-					mention := "@everyone"
-					if user.LiveMentionRole != "" {
-						mention = fmt.Sprintf("<@&%s>", user.LiveMentionRole)
-					}
-
-					targetChannel := user.LiveNotificationChannel
-					if targetChannel == "" {
-						targetChannel = user.NotificationChannel
-					}
-
-					_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
-						Content: mention,
-						Embed:   embedMsg,
-					})
-					if err != nil {
-						guild, _ := b.Session.Guild(user.GuildID)
-						guildName := "Unknown Server"
-						if guild != nil {
-							guildName = guild.Name
+						log.Printf("Error fetching stream info for %s: %v", user.Username, err)
+						// Continue with posts check
+					} else if streamInfo.Response.Stream.Status == 2 && streamInfo.Response.Stream.StartedAt > user.LastStreamStart {
+						_, err = tx.Exec(`
+							UPDATE monitored_users 
+							SET last_stream_start = ? 
+							WHERE guild_id = ? AND user_id = ?
+						`, streamInfo.Response.Stream.StartedAt, user.GuildID, user.UserID)
+						if err != nil {
+							return err
 						}
 
-						channel, _ := b.Session.Channel(user.NotificationChannel)
-						channelName := "Unknown Channel"
-						if channel != nil {
-							channelName = channel.Name
+						embedMsg := embed.CreateLiveStreamEmbed(user.Username, streamInfo, user.AvatarLocation, user.LiveImageURL)
+
+						mention := "@everyone"
+						if user.LiveMentionRole != "" {
+							mention = fmt.Sprintf("<@&%s>", user.LiveMentionRole)
 						}
 
-						log.Printf("Error sending live stream notification for %s | Server: %s (%s) | Channel: %s (%s) | Error: %v",
-							user.Username,
-							guildName,
-							user.GuildID,
-							channelName,
-							user.NotificationChannel,
-							err,
-						)
+						targetChannel := user.LiveNotificationChannel
+						if targetChannel == "" {
+							targetChannel = user.NotificationChannel
+						}
+
+						_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
+							Content: mention,
+							Embed:   embedMsg,
+						})
+						if err != nil {
+							guild, _ := b.Session.Guild(user.GuildID)
+							guildName := "Unknown Server"
+							if guild != nil {
+								guildName = guild.Name
+							}
+
+							channel, _ := b.Session.Channel(user.NotificationChannel)
+							channelName := "Unknown Channel"
+							if channel != nil {
+								channelName = channel.Name
+							}
+
+							log.Printf("Error sending live stream notification for %s | Server: %s (%s) | Channel: %s (%s) | Error: %v",
+								user.Username,
+								guildName,
+								user.GuildID,
+								channelName,
+								user.NotificationChannel,
+								err,
+							)
+						}
 					}
 				}
 
-				postInfo, err := b.APIClient.GetTimelinePost(user.UserID)
-				if err != nil {
-					log.Printf("Error fetching post info: %v", err)
-					continue
-				}
-
-				if user.PostsEnabled && len(postInfo) > 0 && postInfo[0].ID != user.LastPostID {
-					_, err = tx.Exec(`
-                        UPDATE monitored_users 
-                        SET last_post_id = ? 
-                        WHERE guild_id = ? AND user_id = ?
-                    `, postInfo[0].ID, user.GuildID, user.UserID)
+				// Only check for posts if PostsEnabled is true
+				if user.PostsEnabled {
+					postInfo, err := b.APIClient.GetTimelinePost(user.UserID)
 					if err != nil {
-						return err
+						log.Printf("Error fetching post info for %s: %v", user.Username, err)
+						continue
 					}
 
-					// Fetch post media
-					postMedia, err := b.APIClient.GetPostMedia(postInfo[0].ID, b.APIClient.Token, b.APIClient.UserAgent)
-					if err != nil {
-						log.Printf("Error fetching post media: %v", err)
-					}
-
-					embedMsg := embed.CreatePostEmbed(user.Username, postInfo[0], user.AvatarLocation, postMedia)
-
-					mention := "@everyone"
-					if user.PostMentionRole != "" {
-						mention = fmt.Sprintf("<@&%s>", user.PostMentionRole)
-					}
-
-					targetChannel := user.PostNotificationChannel
-					if targetChannel == "" {
-						targetChannel = user.NotificationChannel
-					}
-
-					_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
-						Content: mention,
-						Embed:   embedMsg,
-					})
-					if err != nil {
-						guild, _ := b.Session.Guild(user.GuildID)
-						guildName := "Unknown Server"
-						if guild != nil {
-							guildName = guild.Name
+					if len(postInfo) > 0 && postInfo[0].ID != user.LastPostID {
+						_, err = tx.Exec(`
+							UPDATE monitored_users 
+							SET last_post_id = ? 
+							WHERE guild_id = ? AND user_id = ?
+						`, postInfo[0].ID, user.GuildID, user.UserID)
+						if err != nil {
+							return err
 						}
 
-						channel, _ := b.Session.Channel(user.NotificationChannel)
-						channelName := "Unknown Channel"
-						if channel != nil {
-							channelName = channel.Name
+						// Fetch post media
+						postMedia, err := b.APIClient.GetPostMedia(postInfo[0].ID, b.APIClient.Token, b.APIClient.UserAgent)
+						if err != nil {
+							log.Printf("Error fetching post media: %v", err)
 						}
 
-						log.Printf("Error sending post notification for %s | Server: %s (%s) | Channel: %s (%s) | Error: %v",
-							user.Username,
-							guildName,
-							user.GuildID,
-							channelName,
-							user.NotificationChannel,
-							err,
-						)
+						embedMsg := embed.CreatePostEmbed(user.Username, postInfo[0], user.AvatarLocation, postMedia)
+
+						mention := "@everyone"
+						if user.PostMentionRole != "" {
+							mention = fmt.Sprintf("<@&%s>", user.PostMentionRole)
+						}
+
+						targetChannel := user.PostNotificationChannel
+						if targetChannel == "" {
+							targetChannel = user.NotificationChannel
+						}
+
+						_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
+							Content: mention,
+							Embed:   embedMsg,
+						})
+						if err != nil {
+							guild, _ := b.Session.Guild(user.GuildID)
+							guildName := "Unknown Server"
+							if guild != nil {
+								guildName = guild.Name
+							}
+
+							channel, _ := b.Session.Channel(user.NotificationChannel)
+							channelName := "Unknown Channel"
+							if channel != nil {
+								channelName = channel.Name
+							}
+
+							log.Printf("Error sending post notification for %s | Server: %s (%s) | Channel: %s (%s) | Error: %v",
+								user.Username,
+								guildName,
+								user.GuildID,
+								channelName,
+								user.NotificationChannel,
+								err,
+							)
+						}
 					}
-				} else if len(postInfo) == 0 {
-					//log.Printf("No new posts found for user %s", user.Username)
-					continue
 				}
 			}
 
