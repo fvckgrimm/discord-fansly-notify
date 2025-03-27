@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"strings"
+	//"strings"
 )
 
 func (c *Client) getDeviceID() (string, error) {
@@ -87,7 +87,8 @@ func (c *Client) getSessionID() (string, error) {
 
 func (c *Client) guessCheckKey() (string, error) {
 	mainJSPattern := `\ssrc\s*=\s*"(main\..*?\.js)"`
-	checkKeyPattern := `this\.checkKey_\s*=\s*\["([^"]+)","([^"]+)"\]\.reverse\(\)\.join\("-"\)\+"([^"]+)"`
+	//checkKeyPattern := `this\.checkKey_\s*=\s*\["([^"]+)","([^"]+)"\]\.reverse\(\)\.join\("-"\)\+"([^"]+)"`
+	checkKeyPattern := `let\s+i\s*=\s*\[\s*\]\s*;\s*i\.push\s*\(\s*"([^"]+)"\s*\)\s*,\s*i\.push\s*\(\s*"([^"]+)"\s*\)\s*,\s*i\.push\s*\(\s*"([^"]+)"\s*\)\s*,\s*this\.checkKey_\s*=\s*i\.join\s*\(\s*"-"\s*\)`
 
 	req, err := http.NewRequest("GET", "https://fansly.com/", nil)
 	if err != nil {
@@ -136,7 +137,7 @@ func (c *Client) guessCheckKey() (string, error) {
 		return "", fmt.Errorf("check key not found")
 	}
 
-	return strings.Join([]string{checkKeyMatch[2], checkKeyMatch[1]}, "-") + checkKeyMatch[3], nil
+	return fmt.Sprintf("%s-%s-%s", checkKeyMatch[1], checkKeyMatch[2], checkKeyMatch[3]), nil
 }
 
 func cyrb53(str string) uint64 {
