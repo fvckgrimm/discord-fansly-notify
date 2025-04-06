@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -22,28 +21,39 @@ func (b *Bot) ready(s *discordgo.Session, event *discordgo.Ready) {
 }
 
 func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if !b.hasAdminOrModPermissions(s, i) {
-		b.respondToInteraction(s, i, "You do not have permission to use this command.", false)
-		return
-	}
+	// Handle different interaction types
+	switch i.Type {
+	case discordgo.InteractionApplicationCommand:
+		// Only check permissions for application commands
+		if !b.hasAdminOrModPermissions(s, i) {
+			b.respondToInteraction(s, i, "You do not have permission to use this command.", false)
+			return
+		}
 
-	switch i.ApplicationCommandData().Name {
-	case "add":
-		b.handleAddCommand(s, i)
-	case "remove":
-		b.handleRemoveCommand(s, i)
-	case "list":
-		b.handleListCommand(s, i)
-	case "setliveimage":
-		b.handleSetLiveImageCommand(s, i)
-	case "toggle":
-		b.handleToggleCommand(s, i)
-	case "setchannel":
-		b.handleSetChannelCommand(s, i)
-	case "setpostmention":
-		b.handleSetPostMentionCommand(s, i)
-	case "setlivemention":
-		b.handleSetLiveMentionCommand(s, i)
+		// Handle application commands
+		switch i.ApplicationCommandData().Name {
+		case "add":
+			b.handleAddCommand(s, i)
+		case "remove":
+			b.handleRemoveCommand(s, i)
+		case "list":
+			b.handleListCommand(s, i)
+		case "setliveimage":
+			b.handleSetLiveImageCommand(s, i)
+		case "toggle":
+			b.handleToggleCommand(s, i)
+		case "setchannel":
+			b.handleSetChannelCommand(s, i)
+		case "setpostmention":
+			b.handleSetPostMentionCommand(s, i)
+		case "setlivemention":
+			b.handleSetLiveMentionCommand(s, i)
+		}
+
+	case discordgo.InteractionMessageComponent:
+		// Handle button interactions
+		// This is handled separately by the pagination collector
+		// No need to do anything here as the collector already handles these interactions
 	}
 }
 
@@ -290,10 +300,17 @@ func (b *Bot) respondToInteraction(s *discordgo.Session, i *discordgo.Interactio
 }
 
 func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// Get the requested page if provided
+	requestedPage := 1
+	if len(i.ApplicationCommandData().Options) > 0 {
+		requestedPage = int(i.ApplicationCommandData().Options[0].IntValue())
+		requestedPage = max(1, requestedPage)
+	}
+
 	// Fetch monitored users for the current guild
 	rows, err := b.DB.Query(`
-        SELECT username, notification_channel, post_notification_channel, live_notification_channel, 
-               posts_enabled, live_enabled, live_mention_role, post_mention_role
+        SELECT username, notification_channel, post_notification_channel, live_notification_channel,
+                posts_enabled, live_enabled, live_mention_role, post_mention_role
         FROM monitored_users 
         WHERE guild_id = ?
     `, i.GuildID)
@@ -311,7 +328,7 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			postsEnabled, liveEnabled                               bool
 		)
 		err := rows.Scan(&username, &notificationChannel, &postChannel, &liveChannel,
-			&postsEnabled, &liveEnabled, &postMentionRole, &liveMentionRole)
+			&postsEnabled, &liveEnabled, &liveMentionRole, &postMentionRole)
 		if err != nil {
 			log.Printf("Error scanning row: %v", err)
 			continue
@@ -319,7 +336,6 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 
 		postChannelInfo := fmt.Sprintf("<#%s>", postChannel)
 		liveChannelInfo := fmt.Sprintf("<#%s>", liveChannel)
-
 		roleInfoPost := getRoleName(s, i.GuildID, postMentionRole)
 		roleInfoLive := getRoleName(s, i.GuildID, liveMentionRole)
 
@@ -337,8 +353,8 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			username,
 			postChannelInfo,
 			liveChannelInfo,
-			roleInfoPost,
 			roleInfoLive,
+			roleInfoPost,
 			postStatus,
 			liveStatus,
 		)
@@ -350,8 +366,8 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
-	response := "Monitored models:\n" + strings.Join(monitoredUsers, "\n")
-	b.respondToInteraction(s, i, response, false)
+	// Create paginated response with the requested page
+	b.sendPaginatedList(s, i, monitoredUsers, requestedPage)
 }
 
 func (b *Bot) handleSetLiveImageCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {

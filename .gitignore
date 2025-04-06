@@ -1,3 +1,4 @@
 .env
 bot.db
+bot.db-journal
 main.go.bak

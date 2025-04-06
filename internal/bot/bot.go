@@ -278,7 +278,7 @@ func (b *Bot) updateStatusPeriodically() {
 
 func (b *Bot) retryDbOperation(operation func() error) error {
 	maxRetries := 5
-	for i := 0; i < maxRetries; i++ {
+	for i := range maxRetries {
 		err := operation()
 		if err == nil {
 			return nil

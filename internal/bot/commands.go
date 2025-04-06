@@ -46,6 +46,14 @@ func (b *Bot) registerCommands() {
 		{
 			Name:        "list",
 			Description: "List all monitored models",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "page",
+					Description: "Page number to display",
+					Required:    false,
+				},
+			},
 		},
 		{
 			Name:        "setliveimage",
