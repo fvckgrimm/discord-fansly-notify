@@ -2,49 +2,131 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
+	"os"
+	"time"
 
-	_ "modernc.org/sqlite"
+	"github.com/fvckgrimm/discord-fansly-notify/internal/models"
+
+	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
-
-var DB *sql.DB
 
 const currentVersion = 3
 
-func Init() {
+var (
+	DB     *gorm.DB
+	SqlDB  *sql.DB // For backward compatibility with existing code
+	DBType string  // "sqlite" or "postgres"
+)
+
+// Init initializes the database connection
+func Init(dbType string, connString string) error {
 	var err error
-	DB, err = sql.Open("sqlite", "bot.db")
-	if err != nil {
-		log.Fatal(err)
+	DBType = dbType
+
+	// Set up GORM logger
+	gormLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             time.Second,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		},
+	)
+
+	// Connect to the database
+	gormConfig := &gorm.Config{
+		Logger: gormLogger,
 	}
 
-	_, err = DB.Exec(`
-        CREATE TABLE IF NOT EXISTS schema_version (
-            version INTEGER PRIMARY KEY
-        )
-    `)
+	// Initialize DB based on type
+	switch dbType {
+	case "sqlite":
+		DB, err = gorm.Open(sqlite.Open(connString), gormConfig)
+		if err != nil {
+			return fmt.Errorf("failed to connect to SQLite database: %w", err)
+		}
+		// Configure SQLite for better concurrent access
+		sqlDB, err := DB.DB()
+		if err != nil {
+			return fmt.Errorf("failed to get DB instance: %w", err)
+		}
+		// Set connection pool settings
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetConnMaxLifetime(time.Hour)
+		// Enable WAL mode for better concurrency
+		DB.Exec("PRAGMA journal_mode = WAL")
+		DB.Exec("PRAGMA busy_timeout = 5000")
+
+	case "postgres":
+		DB, err = gorm.Open(postgres.Open(connString), gormConfig)
+		if err != nil {
+			return fmt.Errorf("failed to connect to PostgreSQL database: %w", err)
+		}
+		sqlDB, err := DB.DB()
+		if err != nil {
+			return fmt.Errorf("failed to get DB instance: %w", err)
+		}
+		// Set connection pool settings
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetConnMaxLifetime(time.Hour)
+
+	default:
+		return fmt.Errorf("unsupported database type: %s", dbType)
+	}
+
+	// Store SQL DB for backward compatibility
+	SqlDB, err = DB.DB()
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("failed to get SQL DB: %w", err)
+	}
+
+	// Auto-migrate models
+	err = DB.AutoMigrate(&models.SchemaVersion{}, &models.MonitoredUser{})
+	if err != nil {
+		return fmt.Errorf("failed to migrate database schema: %w", err)
 	}
 
 	// Get current schema version
-	var version int
-	err = DB.QueryRow("SELECT version FROM schema_version").Scan(&version)
-	if err != nil {
-		// No version found, assume fresh install
-		_, err = DB.Exec("INSERT INTO schema_version (version) VALUES (0)")
-		if err != nil {
-			log.Fatal(err)
+	var version models.SchemaVersion
+	result := DB.First(&version)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			// No version found, assume fresh install
+			DB.Create(&models.SchemaVersion{Version: 0})
+			version.Version = 0
+		} else {
+			return fmt.Errorf("failed to get schema version: %w", result.Error)
 		}
-		version = 0
 	}
 
-	// Run migrations
-	runMigrations(version)
+	// Run migrations if needed
+	err = runMigrations(version.Version)
+	if err != nil {
+		return fmt.Errorf("migration failed: %w", err)
+	}
+
+	log.Printf("Connected to %s database successfully", dbType)
+	return nil
 }
 
-func runMigrations(currentDBVersion int) {
-	migrations := []func(*sql.DB) error{
+// Close closes the database connection
+func Close() {
+	if SqlDB != nil {
+		SqlDB.Close()
+	}
+}
+
+// runMigrations runs database migrations
+func runMigrations(currentDBVersion int) error {
+	migrations := []func(*gorm.DB) error{
 		migrateToV1,
 		migrateToV2,
 		migrateToV3,
@@ -60,137 +142,55 @@ func runMigrations(currentDBVersion int) {
 		log.Printf("Running migration to version %d", version)
 		err := migration(DB)
 		if err != nil {
-			log.Fatalf("Migration to version %d failed: %v", version, err)
+			return fmt.Errorf("migration to version %d failed: %v", version, err)
 		}
 
-		_, err = DB.Exec("UPDATE schema_version SET version = ?", version)
-		if err != nil {
-			log.Fatalf("Failed to update schema version: %v", err)
-		}
+		// Update schema version
+		DB.Model(&models.SchemaVersion{}).Where("1=1").Update("version", version)
 		log.Printf("Migration to version %d completed", version)
 	}
+
+	return nil
 }
 
-func migrateToV1(db *sql.DB) error {
-	// Initial schema
-	_, err := db.Exec(`
-        CREATE TABLE IF NOT EXISTS monitored_users (
-            guild_id TEXT,
-            user_id TEXT,
-            username TEXT,
-            notification_channel TEXT,
-            last_post_id TEXT,
-            last_stream_start INTEGER,
-            mention_role TEXT,
-            avatar_location TEXT,
-            avatar_location_updated_at INTEGER,
-            live_image_url TEXT,
-            posts_enabled BOOLEAN DEFAULT 1,
-            live_enabled BOOLEAN DEFAULT 1,
-            PRIMARY KEY (guild_id, user_id)
-        )
-    `)
-	return err
+// migrateToV1 creates the initial schema
+func migrateToV1(db *gorm.DB) error {
+	// This is handled by AutoMigrate now, but we keep the function for versioning
+	return nil
 }
 
-func migrateToV2(db *sql.DB) error {
-	// Add separate notification channels
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Add new columns
-	_, err = tx.Exec(`
-        ALTER TABLE monitored_users 
-        ADD COLUMN post_notification_channel TEXT;
-    `)
-	if err != nil {
-		return err
-	}
-
-	_, err = tx.Exec(`
-        ALTER TABLE monitored_users 
-        ADD COLUMN live_notification_channel TEXT;
-    `)
-	if err != nil {
-		return err
-	}
-
-	// Set default values from existing notification_channel
-	_, err = tx.Exec(`
-        UPDATE monitored_users 
-        SET post_notification_channel = notification_channel,
-            live_notification_channel = notification_channel
-    `)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+func migrateToV2(db *gorm.DB) error {
+	// The columns are already defined in the model
+	// This is just here for backward compatibility
+	return nil
 }
 
-func migrateToV3(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	_, err = tx.Exec(`
-        ALTER TABLE monitored_users 
-        ADD COLUMN post_mention_role TEXT;
-    `)
-	if err != nil {
-		return err
-	}
-
-	_, err = tx.Exec(`
-        ALTER TABLE monitored_users 
-        ADD COLUMN live_mention_role TEXT;
-    `)
-	if err != nil {
-		return err
-	}
-
-	_, err = tx.Exec(`
-        UPDATE monitored_users 
-        SET post_mention_role = mention_role,
-            live_mention_role = mention_role
-    `)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+func migrateToV3(db *gorm.DB) error {
+	// The columns are already defined in the model
+	// This is just here for backward compatibility
+	return nil
 }
 
-func Close() {
-	DB.Close()
-}
+// WithRetry performs a database operation with retry logic for locked database
+func WithRetry(operation func() error) error {
+	maxRetries := 5
+	retries := make([]int, maxRetries)
 
-func createTables() {
-	_, err := DB.Exec(`
-		CREATE TABLE IF NOT EXISTS monitored_users (
-			guild_id TEXT,
-			user_id TEXT,
-			username TEXT,
-			notification_channel TEXT,
-			post_notification_channel TEXT,
-            live_notification_channel TEXT,
-			last_post_id TEXT,
-			last_stream_start INTEGER,
-			mention_role TEXT,
-			avatar_location TEXT,
-			avatar_location_updated_at INTEGER,
-			live_image_url	TEXT,
-			posts_enabled BOOLEAN DEFAULT 1,
-            live_enabled BOOLEAN DEFAULT 1,
-			PRIMARY KEY (guild_id, user_id)
-		)
-	`)
-	if err != nil {
-		log.Fatal(err)
+	for i := range retries {
+		err := operation()
+		if err == nil {
+			return nil
+		}
+
+		// Special handling for SQLite busy errors
+		if DBType == "sqlite" && (err.Error() == "database is locked" || err.Error() == "database is busy") {
+			backoff := time.Duration(100*(i+1)) * time.Millisecond
+			log.Printf("Database locked, retrying in %v (attempt %d/%d)", backoff, i+1, maxRetries)
+			time.Sleep(backoff)
+			continue
+		}
+
+		return err
 	}
+	return fmt.Errorf("operation failed after %d retries", maxRetries)
 }

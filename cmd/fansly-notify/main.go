@@ -13,7 +13,11 @@ import (
 
 func main() {
 	config.Load()
-	database.Init()
+
+	err := database.Init(config.DatabaseType, config.GetDatabaseConnectionString())
+	if err != nil {
+		log.Fatalf("Error initializing database: %v", err)
+	}
 	defer database.Close()
 
 	bot, err := bot.New()

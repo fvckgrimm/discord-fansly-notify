@@ -2,7 +2,6 @@ package bot
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"regexp"
@@ -10,6 +9,8 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/fvckgrimm/discord-fansly-notify/internal/config"
+	"github.com/fvckgrimm/discord-fansly-notify/internal/database"
+	"github.com/fvckgrimm/discord-fansly-notify/internal/models"
 )
 
 var tokenRegex = regexp.MustCompile(`[A-Za-z0-9]{30,}`)
@@ -53,7 +54,6 @@ func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 	case discordgo.InteractionMessageComponent:
 		// Handle button interactions
 		// This is handled separately by the pagination collector
-		// No need to do anything here as the collector already handles these interactions
 	}
 }
 
@@ -74,7 +74,7 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 		}
 	}
 
-	// Log What Creators are being monitored to better handle potential issues
+	// Log what creators are being monitored
 	logMessage := fmt.Sprintf("`[ %s ]` %s:\n`Requested Creator Name:` **%s**\n----------",
 		time.Now().Format("2006-01-02 15:04:05"),
 		i.Member.User.Username,
@@ -93,13 +93,12 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 
-	if accountInfo == nil /*|| accountInfo.Avatar.Locations == nil || len(accountInfo.Avatar.Variants) == 0 || len(accountInfo.Avatar.Variants[0].Locations) == 0*/ {
+	if accountInfo == nil {
 		log.Printf("Invalid account info structure for %s", username)
 		b.respondToInteraction(s, i, "Error: Invalid account info structure", false)
 		return
 	}
 
-	//avatarLocation := accountInfo.Avatar.Variants[0].Locations[0].Location
 	// Improve getting avatar location
 	var avatarLocation string
 	if len(accountInfo.Avatar.Variants) > 0 && len(accountInfo.Avatar.Variants[0].Locations) > 0 {
@@ -131,7 +130,6 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 					followErr := b.APIClient.FollowAccount(accountInfo.ID)
 					if followErr != nil {
 						log.Printf("Note: Could not follow %s: %v", username, followErr)
-						//continue since we'll try to monitor
 					}
 				}
 			}
@@ -170,13 +168,8 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 
 		// Add temporary handler for reactions
 		handlerID := s.AddHandler(func(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
-			// Only process reactions to our message
-			if r.MessageID != msg.ID || r.UserID == s.State.User.ID {
-				return
-			}
-
-			// Only process reactions from the command initiator
-			if r.UserID != i.Member.User.ID {
+			// Only process reactions to our message from the command initiator
+			if r.MessageID != msg.ID || r.UserID == s.State.User.ID || r.UserID != i.Member.User.ID {
 				return
 			}
 
@@ -209,18 +202,27 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 		switch reaction {
 		case "✅":
 			// Store user with posts disabled
-			err := b.retryDbOperation(func() error {
-				_, err := b.DB.Exec(`
-                    INSERT OR REPLACE INTO monitored_users 
-                    (guild_id, user_id, username, notification_channel, post_notification_channel, live_notification_channel, 
-                    last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, 
-                    live_image_url, posts_enabled, live_enabled, live_mention_role, post_mention_role) 
-                    VALUES (?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?, 0, 1, ?, ?)
-                `, i.GuildID, accountInfo.ID, username, channel.ID, channel.ID, channel.ID,
-					mentionRole, avatarLocation, time.Now().Unix(), "", mentionRole, mentionRole)
-				return err
-			})
+			repo := database.NewRepository()
+			user := &models.MonitoredUser{
+				GuildID:                 i.GuildID,
+				UserID:                  accountInfo.ID,
+				Username:                username,
+				NotificationChannel:     channel.ID,
+				PostNotificationChannel: channel.ID,
+				LiveNotificationChannel: channel.ID,
+				LastPostID:              "",
+				LastStreamStart:         0,
+				MentionRole:             mentionRole,
+				AvatarLocation:          avatarLocation,
+				AvatarLocationUpdatedAt: time.Now().Unix(),
+				LiveImageURL:            "",
+				PostsEnabled:            false,
+				LiveEnabled:             true,
+				LiveMentionRole:         mentionRole,
+				PostMentionRole:         mentionRole,
+			}
 
+			err := repo.AddOrUpdateMonitoredUser(user)
 			if err != nil {
 				s.ChannelMessageSend(i.ChannelID, fmt.Sprintf("Error storing user: %v", err))
 				return
@@ -238,15 +240,27 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 	}
 
 	// Store the monitored user in the database
-	err = b.retryDbOperation(func() error {
-		_, err = b.DB.Exec(`
-			INSERT OR REPLACE INTO monitored_users 
-			(guild_id, user_id, username, notification_channel, post_notification_channel, live_notification_channel, last_post_id, last_stream_start, mention_role, avatar_location, avatar_location_updated_at, live_image_url, posts_enabled, live_enabled, live_mention_role, post_mention_role) 
-			VALUES (?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?, 1, 1, ?, ?)
-		`, i.GuildID, accountInfo.ID, username, channel.ID, channel.ID, channel.ID, mentionRole, avatarLocation, time.Now().Unix(), "", mentionRole, mentionRole)
-		return err
-	})
+	repo := database.NewRepository()
+	user := &models.MonitoredUser{
+		GuildID:                 i.GuildID,
+		UserID:                  accountInfo.ID,
+		Username:                username,
+		NotificationChannel:     channel.ID,
+		PostNotificationChannel: channel.ID,
+		LiveNotificationChannel: channel.ID,
+		LastPostID:              "",
+		LastStreamStart:         0,
+		MentionRole:             mentionRole,
+		AvatarLocation:          avatarLocation,
+		AvatarLocationUpdatedAt: time.Now().Unix(),
+		LiveImageURL:            "",
+		PostsEnabled:            true,
+		LiveEnabled:             true,
+		LiveMentionRole:         mentionRole,
+		PostMentionRole:         mentionRole,
+	}
 
+	err = repo.AddOrUpdateMonitoredUser(user)
 	if err != nil {
 		b.respondToInteraction(s, i, fmt.Sprintf("Error storing user: %v", err), false)
 		return
@@ -259,29 +273,14 @@ func (b *Bot) handleRemoveCommand(s *discordgo.Session, i *discordgo.Interaction
 	username := i.ApplicationCommandData().Options[0].StringValue()
 
 	// Remove the monitored user from the database
-	var rowsAffected int64
-	err := b.retryDbOperation(func() error {
-		result, err := b.DB.Exec(`
-            DELETE FROM monitored_users 
-            WHERE guild_id = ? AND username = ?
-        `, i.GuildID, username)
-		if err != nil {
-			return err
-		}
-		rowsAffected, _ = result.RowsAffected()
-		return nil
-	})
-
+	repo := database.NewRepository()
+	err := repo.DeleteMonitoredUserByUsername(i.GuildID, username)
 	if err != nil {
 		b.respondToInteraction(s, i, fmt.Sprintf("Error removing user: %v", err), false)
 		return
 	}
 
-	if rowsAffected == 0 {
-		b.respondToInteraction(s, i, fmt.Sprintf("User %s was not found in the monitoring list", username), false)
-	} else {
-		b.respondToInteraction(s, i, fmt.Sprintf("Removed %s from monitoring list", username), false)
-	}
+	b.respondToInteraction(s, i, fmt.Sprintf("Removed %s from monitoring list", username), false)
 }
 
 func (b *Bot) respondToInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, content string, ephemeral bool) {
@@ -308,49 +307,33 @@ func (b *Bot) handleListCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	}
 
 	// Fetch monitored users for the current guild
-	rows, err := b.DB.Query(`
-        SELECT username, notification_channel, post_notification_channel, live_notification_channel,
-                posts_enabled, live_enabled, live_mention_role, post_mention_role
-        FROM monitored_users 
-        WHERE guild_id = ?
-    `, i.GuildID)
+	repo := database.NewRepository()
+	users, err := repo.GetMonitoredUsersForGuild(i.GuildID)
 	if err != nil {
 		b.respondToInteraction(s, i, fmt.Sprintf("Error fetching monitored users: %v", err), false)
 		return
 	}
-	defer rows.Close()
 
 	var monitoredUsers []string
-	for rows.Next() {
-		var (
-			username, notificationChannel, postChannel, liveChannel string
-			postMentionRole, liveMentionRole                        string
-			postsEnabled, liveEnabled                               bool
-		)
-		err := rows.Scan(&username, &notificationChannel, &postChannel, &liveChannel,
-			&postsEnabled, &liveEnabled, &liveMentionRole, &postMentionRole)
-		if err != nil {
-			log.Printf("Error scanning row: %v", err)
-			continue
-		}
-
-		postChannelInfo := fmt.Sprintf("<#%s>", postChannel)
-		liveChannelInfo := fmt.Sprintf("<#%s>", liveChannel)
-		roleInfoPost := getRoleName(s, i.GuildID, postMentionRole)
-		roleInfoLive := getRoleName(s, i.GuildID, liveMentionRole)
+	for _, user := range users {
+		// Directly use the channel IDs for proper Discord mention formatting
+		postChannelInfo := fmt.Sprintf("<#%s>", user.PostNotificationChannel)
+		liveChannelInfo := fmt.Sprintf("<#%s>", user.LiveNotificationChannel)
+		roleInfoPost := getRoleName(s, i.GuildID, user.PostMentionRole)
+		roleInfoLive := getRoleName(s, i.GuildID, user.LiveMentionRole)
 
 		// Create status indicators
 		postStatus := "✅"
-		if !postsEnabled {
+		if !user.PostsEnabled {
 			postStatus = "❌"
 		}
 		liveStatus := "✅"
-		if !liveEnabled {
+		if !user.LiveEnabled {
 			liveStatus = "❌"
 		}
 
 		userInfo := fmt.Sprintf("- %s\n  • Post Channel: %s\n  • Live Channel: %s\n  • Live Role: %s\n  • Post Role: %s\n  • Posts: %s\n  • Live: %s",
-			username,
+			user.Username,
 			postChannelInfo,
 			liveChannelInfo,
 			roleInfoLive,
@@ -392,7 +375,6 @@ func (b *Bot) handleSetLiveImageCommand(s *discordgo.Session, i *discordgo.Inter
 	if len(i.ApplicationCommandData().Resolved.Attachments) > 0 {
 		for _, attachment := range i.ApplicationCommandData().Resolved.Attachments {
 			imageURL = attachment.URL
-			//log.Println(imageURL)
 			break
 		}
 	}
@@ -403,12 +385,8 @@ func (b *Bot) handleSetLiveImageCommand(s *discordgo.Session, i *discordgo.Inter
 	}
 
 	// Update the database with the new live image URL
-	_, err = b.DB.Exec(`
-        UPDATE monitored_users 
-        SET live_image_url = ? 
-        WHERE guild_id = ? AND username = ?
-    `, imageURL, i.GuildID, username)
-
+	repo := database.NewRepository()
+	err = repo.UpdateLiveImageURL(i.GuildID, username, imageURL)
 	if err != nil {
 		log.Printf("Error updating live image URL: %v", err)
 		b.editInteractionResponse(s, i, "An error occurred while setting the live image.")
@@ -424,32 +402,29 @@ func (b *Bot) handleToggleCommand(s *discordgo.Session, i *discordgo.Interaction
 	notifiType := options[1].StringValue()
 	enabled := options[2].BoolValue()
 
-	var column string
+	repo := database.NewRepository()
+	var err error
+
 	switch notifiType {
 	case "posts":
-		column = "posts_enabled"
+		if enabled {
+			err = repo.EnablePosts(i.GuildID, username)
+		} else {
+			err = repo.DisablePosts(i.GuildID, username)
+		}
 	case "live":
-		column = "live_enabled"
+		if enabled {
+			err = repo.EnableLive(i.GuildID, username)
+		} else {
+			err = repo.DisableLive(i.GuildID, username)
+		}
 	default:
 		b.respondToInteraction(s, i, "Invalid notification type", false)
 		return
 	}
 
-	query := fmt.Sprintf(`
-		UPDATE monitored_users
-		SET %s = ?
-		WHERE guild_id = ? AND username = ?
-		`, column)
-
-	result, err := b.DB.Exec(query, enabled, i.GuildID, username)
 	if err != nil {
 		b.respondToInteraction(s, i, fmt.Sprintf("Error updating settings: %v", err), false)
-		return
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username), false)
 		return
 	}
 
@@ -467,32 +442,21 @@ func (b *Bot) handleSetChannelCommand(s *discordgo.Session, i *discordgo.Interac
 	notifType := options[1].StringValue()
 	channel := options[2].ChannelValue(s)
 
-	var columnName string
+	repo := database.NewRepository()
+	var err error
+
 	switch notifType {
 	case "posts":
-		columnName = "post_notification_channel"
+		err = repo.UpdatePostChannel(i.GuildID, username, channel.ID)
 	case "live":
-		columnName = "live_notification_channel"
+		err = repo.UpdateLiveChannel(i.GuildID, username, channel.ID)
 	default:
 		b.respondToInteraction(s, i, "Invalid notification type", false)
 		return
 	}
 
-	query := fmt.Sprintf(`
-        UPDATE monitored_users 
-        SET %s = ? 
-        WHERE guild_id = ? AND username = ?
-    `, columnName)
-
-	result, err := b.DB.Exec(query, channel.ID, i.GuildID, username)
 	if err != nil {
 		b.respondToInteraction(s, i, fmt.Sprintf("Error updating channel: %v", err), false)
-		return
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username), false)
 		return
 	}
 
@@ -510,15 +474,18 @@ func (b *Bot) handleSetPostMentionCommand(s *discordgo.Session, i *discordgo.Int
 		}
 	}
 
-	result, err := b.DB.Exec(`
-        UPDATE monitored_users 
-        SET post_mention_role = ? 
-        WHERE guild_id = ? AND username = ?
-    `, roleID, i.GuildID, username)
-
-	if handleUpdateResponse(b, s, i, err, result, "post mention role", username, roleID) {
+	repo := database.NewRepository()
+	err := repo.UpdatePostMentionRole(i.GuildID, username, roleID)
+	if err != nil {
+		b.respondToInteraction(s, i, fmt.Sprintf("Error updating post mention role: %v", err), false)
 		return
 	}
+
+	message := fmt.Sprintf("Post mention role for %s has been cleared.", username)
+	if roleID != "" {
+		message = fmt.Sprintf("Post mention role for %s set to <@&%s>", username, roleID)
+	}
+	b.respondToInteraction(s, i, message, false)
 }
 
 func (b *Bot) handleSetLiveMentionCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -532,35 +499,18 @@ func (b *Bot) handleSetLiveMentionCommand(s *discordgo.Session, i *discordgo.Int
 		}
 	}
 
-	result, err := b.DB.Exec(`
-        UPDATE monitored_users 
-        SET live_mention_role = ? 
-        WHERE guild_id = ? AND username = ?
-    `, roleID, i.GuildID, username)
-
-	if handleUpdateResponse(b, s, i, err, result, "live mention role", username, roleID) {
+	repo := database.NewRepository()
+	err := repo.UpdateLiveMentionRole(i.GuildID, username, roleID)
+	if err != nil {
+		b.respondToInteraction(s, i, fmt.Sprintf("Error updating live mention role: %v", err), false)
 		return
 	}
-}
 
-func handleUpdateResponse(b *Bot, s *discordgo.Session, i *discordgo.InteractionCreate, err error, result sql.Result, roleType, username, roleID string) bool {
-	if err != nil {
-		b.respondToInteraction(s, i, fmt.Sprintf("Error updating %s: %v", roleType, err), false)
-		return true
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		b.respondToInteraction(s, i, fmt.Sprintf("User %s not found", username), false)
-		return true
-	}
-
-	message := fmt.Sprintf("%s for %s has been cleared.", roleType, username)
+	message := fmt.Sprintf("Live mention role for %s has been cleared.", username)
 	if roleID != "" {
-		message = fmt.Sprintf("%s for %s set to <@&%s>", roleType, username, roleID)
+		message = fmt.Sprintf("Live mention role for %s set to <@&%s>", username, roleID)
 	}
 	b.respondToInteraction(s, i, message, false)
-	return false
 }
 
 func getRoleName(s *discordgo.Session, guildID, roleID string) string {
@@ -574,7 +524,6 @@ func getRoleName(s *discordgo.Session, guildID, roleID string) string {
 	return role.Name
 }
 
-// Add this new helper function
 func (b *Bot) editInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
 	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content: &content,

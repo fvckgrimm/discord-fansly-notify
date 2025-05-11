@@ -1,4 +1,7 @@
 .env
-bot.db
+notifansly
+fansly_notify
+bot.db*
 bot.db-journal
+migrate/
 main.go.bak
