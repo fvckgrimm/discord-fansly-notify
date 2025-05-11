@@ -75,7 +75,7 @@ func (r *Repository) AddOrUpdateMonitoredUser(user *models.MonitoredUser) error 
 		return r.db.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "guild_id"}, {Name: "user_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"username", "notification_channel", "post_channel", "live_channel",
+				"username", "notification_channel", "post_notification_channel", "live_notification_channel",
 				"last_post_id", "last_stream_start", "mention_role", "avatar_location",
 				"avatar_location_updated_at", "live_image_url", "posts_enabled", "live_enabled",
 				"live_mention_role", "post_mention_role",
@@ -267,7 +267,7 @@ func (r *Repository) UpdateLiveImageURL(guildID, username, imageURL string) erro
 func (r *Repository) UpdatePostChannel(guildID, username, channelID string) error {
 	result := r.db.Model(&models.MonitoredUser{}).
 		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("post_channel", channelID)
+		Update("post_notification_channel", channelID)
 
 	if result.Error != nil {
 		return result.Error
@@ -284,7 +284,7 @@ func (r *Repository) UpdatePostChannel(guildID, username, channelID string) erro
 func (r *Repository) UpdateLiveChannel(guildID, username, channelID string) error {
 	result := r.db.Model(&models.MonitoredUser{}).
 		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("live_channel", channelID)
+		Update("live_notification_channel", channelID)
 
 	if result.Error != nil {
 		return result.Error
