@@ -185,40 +185,60 @@ func (r *Repository) UpdateAvatarInfoByUsername(guildID, username, avatarLocatio
 	return nil
 }
 
-// DisablePosts disables post notifications for a monitored user
-func (r *Repository) DisablePosts(guildID, userID string) error {
-	return WithRetry(func() error {
-		return r.db.Model(&models.MonitoredUser{}).
-			Where("guild_id = ? AND user_id = ?", guildID, userID).
-			Update("posts_enabled", false).Error
-	})
+// DisablePostsByUsername disables post notifications for a monitored user by username
+func (r *Repository) DisablePostsByUsername(guildID, username string) error {
+	result := r.db.Model(&models.MonitoredUser{}).
+		Where("guild_id = ? AND username = ?", guildID, username).
+		Update("posts_enabled", false)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("user not found")
+	}
+	return nil
 }
 
-// EnablePosts enables post notifications for a monitored user
-func (r *Repository) EnablePosts(guildID, userID string) error {
-	return WithRetry(func() error {
-		return r.db.Model(&models.MonitoredUser{}).
-			Where("guild_id = ? AND user_id = ?", guildID, userID).
-			Update("posts_enabled", true).Error
-	})
+// EnablePostsByUsername enables post notifications for a monitored user by username
+func (r *Repository) EnablePostsByUsername(guildID, username string) error {
+	result := r.db.Model(&models.MonitoredUser{}).
+		Where("guild_id = ? AND username = ?", guildID, username).
+		Update("posts_enabled", true)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("user not found")
+	}
+	return nil
 }
 
-// DisableLive disables live stream notifications for a monitored user
-func (r *Repository) DisableLive(guildID, userID string) error {
-	return WithRetry(func() error {
-		return r.db.Model(&models.MonitoredUser{}).
-			Where("guild_id = ? AND user_id = ?", guildID, userID).
-			Update("live_enabled", false).Error
-	})
+// DisableLiveByUsername disables live stream notifications for a monitored user by username
+func (r *Repository) DisableLiveByUsername(guildID, username string) error {
+	result := r.db.Model(&models.MonitoredUser{}).
+		Where("guild_id = ? AND username = ?", guildID, username).
+		Update("live_enabled", false)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("user not found")
+	}
+	return nil
 }
 
-// EnableLive enables live stream notifications for a monitored user
-func (r *Repository) EnableLive(guildID, userID string) error {
-	return WithRetry(func() error {
-		return r.db.Model(&models.MonitoredUser{}).
-			Where("guild_id = ? AND user_id = ?", guildID, userID).
-			Update("live_enabled", true).Error
-	})
+// EnableLiveByUsername enables live stream notifications for a monitored user by username
+func (r *Repository) EnableLiveByUsername(guildID, username string) error {
+	result := r.db.Model(&models.MonitoredUser{}).
+		Where("guild_id = ? AND username = ?", guildID, username).
+		Update("live_enabled", true)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("user not found")
+	}
+	return nil
 }
 
 // CountMonitoredUsers counts all monitored users

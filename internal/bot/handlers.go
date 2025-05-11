@@ -408,15 +408,15 @@ func (b *Bot) handleToggleCommand(s *discordgo.Session, i *discordgo.Interaction
 	switch notifiType {
 	case "posts":
 		if enabled {
-			err = repo.EnablePosts(i.GuildID, username)
+			err = repo.EnablePostsByUsername(i.GuildID, username)
 		} else {
-			err = repo.DisablePosts(i.GuildID, username)
+			err = repo.DisablePostsByUsername(i.GuildID, username)
 		}
 	case "live":
 		if enabled {
-			err = repo.EnableLive(i.GuildID, username)
+			err = repo.EnableLiveByUsername(i.GuildID, username)
 		} else {
-			err = repo.DisableLive(i.GuildID, username)
+			err = repo.DisableLiveByUsername(i.GuildID, username)
 		}
 	default:
 		b.respondToInteraction(s, i, "Invalid notification type", false)

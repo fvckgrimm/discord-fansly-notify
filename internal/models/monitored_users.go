@@ -13,8 +13,8 @@ type MonitoredUser struct {
 	AvatarLocation          string `gorm:"column:avatar_location"`
 	AvatarLocationUpdatedAt int64  `gorm:"column:avatar_location_updated_at"`
 	LiveImageURL            string `gorm:"column:live_image_url"`
-	PostsEnabled            bool   `gorm:"default:true"`
-	LiveEnabled             bool   `gorm:"default:true"`
+	PostsEnabled            bool   `gorm:"column:posts_enabled"`
+	LiveEnabled             bool   `gorm:"column:live_enabled"`
 	LiveMentionRole         string `gorm:"column:live_mention_role"`
 	PostMentionRole         string `gorm:"column:post_mention_role"`
 }
