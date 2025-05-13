@@ -13,7 +13,10 @@ import (
 	"github.com/fvckgrimm/discord-fansly-notify/internal/models"
 )
 
-var tokenRegex = regexp.MustCompile(`[A-Za-z0-9]{30,}`)
+var (
+	tokenRegex     = regexp.MustCompile(`[A-Za-z0-9]{30,}`)
+	fanslyURLRegex = regexp.MustCompile(`(?:https?://)?(?:www\.)?(?:fans\.ly|fansly\.com)/([^/\s]+)(?:/.*)?`)
+)
 
 func (b *Bot) ready(s *discordgo.Session, event *discordgo.Ready) {
 	log.Println("Bot is ready")
@@ -57,9 +60,19 @@ func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 	}
 }
 
+func extractUsernameFromURL(input string) string {
+	matches := fanslyURLRegex.FindStringSubmatch(input)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return input
+}
+
 func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
-	username := options[0].StringValue()
+	rawUsername := options[0].StringValue()
+
+	username := extractUsernameFromURL(rawUsername)
 
 	if tokenRegex.MatchString(username) {
 		b.respondToInteraction(s, i, "Error: Username appears to contain a token. Please provide a valid username.", true)
