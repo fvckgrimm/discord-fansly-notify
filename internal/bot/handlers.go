@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	tokenRegex     = regexp.MustCompile(`[A-Za-z0-9]{30,}`)
+	tokenRegex     = regexp.MustCompile(`[A-Za-z0-9]{40,}`)
 	fanslyURLRegex = regexp.MustCompile(`(?:https?://)?(?:www\.)?(?:fans\.ly|fansly\.com)/([^/\s]+)(?:/.*)?`)
 )
 
@@ -30,7 +30,14 @@ func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 	case discordgo.InteractionApplicationCommand:
 		// Only check permissions for application commands
 		if !b.hasAdminOrModPermissions(s, i) {
+			username := "User"
+			if i.User != nil {
+				username = i.User.Username
+			} else if i.Member != nil && i.Member.User != nil {
+				username = i.Member.User.Username
+			}
 			b.respondToInteraction(s, i, "You do not have permission to use this command.", false)
+			log.Printf("Permission denied for user %s", username)
 			return
 		}
 
@@ -547,6 +554,22 @@ func (b *Bot) editInteractionResponse(s *discordgo.Session, i *discordgo.Interac
 }
 
 func (b *Bot) hasAdminOrModPermissions(s *discordgo.Session, i *discordgo.InteractionCreate) bool {
+	// return false if interaction is in dms
+	if i.GuildID == "" {
+		return false
+	}
+
+	// Check if Member is nil (can happen in some interaction types)
+	if i.Member == nil {
+		// Try to get member info if possible
+		member, err := s.GuildMember(i.GuildID, i.User.ID)
+		if err != nil {
+			log.Printf("Error fetching member info: %v", err)
+			return false
+		}
+		i.Member = member
+	}
+
 	// Check if the user is the server owner
 	guild, err := s.Guild(i.GuildID)
 	if err == nil && guild.OwnerID == i.Member.User.ID {
