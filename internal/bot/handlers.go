@@ -72,6 +72,11 @@ func extractUsernameFromURL(input string) string {
 	if len(matches) > 1 {
 		return matches[1]
 	}
+
+	if len(input) > 0 && input[0] == '@' {
+		return input[1:]
+	}
+
 	return input
 }
 
