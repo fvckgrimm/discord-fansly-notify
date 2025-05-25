@@ -74,7 +74,6 @@ func (b *Bot) guildDelete(s *discordgo.Session, event *discordgo.GuildDelete) {
 func (b *Bot) monitorUsers() {
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
-
 	for range ticker.C {
 		users, err := b.Repo.GetMonitoredUsers()
 		if err != nil {
@@ -82,149 +81,173 @@ func (b *Bot) monitorUsers() {
 			continue
 		}
 
+		// Group users by UserID to deduplicate API calls
+		userGroups := make(map[string][]models.MonitoredUser)
 		for _, user := range users {
-			// Check if avatar URL needs refreshing (e.g., older than 6 days)
-			if time.Now().Unix()-user.AvatarLocationUpdatedAt > 6*24*60*60 {
-				newAvatarLocation, err := b.refreshAvatarURL(user.Username)
+			userGroups[user.UserID] = append(userGroups[user.UserID], user)
+		}
+
+		// Process each unique user only once
+		for _, userEntries := range userGroups {
+			// Use the first entry to get user info (they should all have same UserID/Username)
+			primaryUser := userEntries[0]
+
+			// Check if avatar needs refreshing (only once per user)
+			if time.Now().Unix()-primaryUser.AvatarLocationUpdatedAt > 6*24*60*60 {
+				newAvatarLocation, err := b.refreshAvatarURL(primaryUser.Username)
 				if err != nil {
-					log.Printf("Error refreshing avatar URL for user %s: %v", user.Username, err)
+					log.Printf("Error refreshing avatar URL for user %s: %v", primaryUser.Username, err)
 				} else {
-					err = b.Repo.UpdateAvatarInfo(user.GuildID, user.UserID, newAvatarLocation)
-					if err != nil {
-						log.Printf("Error updating avatar URL in database: %v", err)
-					} else {
-						user.AvatarLocation = newAvatarLocation
+					// Update avatar for all entries of this user
+					for _, user := range userEntries {
+						err = b.Repo.UpdateAvatarInfo(user.GuildID, user.UserID, newAvatarLocation)
+						if err != nil {
+							log.Printf("Error updating avatar URL in database: %v", err)
+						}
 					}
 				}
 			}
 
-			// Only check for live streams if LiveEnabled is true
-			if user.LiveEnabled {
-				b.checkUserLiveStream(user)
+			// Check live stream only once per user
+			b.checkUserLiveStreamOptimized(userEntries)
+
+			// Check posts only once per user
+			b.checkUserPostsOptimized(userEntries)
+		}
+	}
+}
+
+func (b *Bot) checkUserLiveStreamOptimized(userEntries []models.MonitoredUser) {
+	// Filter entries that have live notifications enabled
+	liveEnabledUsers := make([]models.MonitoredUser, 0)
+	for _, user := range userEntries {
+		if user.LiveEnabled {
+			liveEnabledUsers = append(liveEnabledUsers, user)
+		}
+	}
+
+	if len(liveEnabledUsers) == 0 {
+		return
+	}
+
+	// Make API call only once
+	primaryUser := liveEnabledUsers[0]
+	streamInfo, err := b.APIClient.GetStreamInfo(primaryUser.UserID)
+	if err != nil {
+		log.Printf("Error fetching stream info for %s: %v", primaryUser.Username, err)
+		return
+	}
+
+	// Check if it's a new stream
+	if streamInfo.Response.Stream.Status == 2 && streamInfo.Response.Stream.StartedAt > primaryUser.LastStreamStart {
+		// Send notifications to all servers that have this user monitored with live enabled
+		for _, user := range liveEnabledUsers {
+			err = b.Repo.UpdateLastStreamStart(user.GuildID, user.UserID, streamInfo.Response.Stream.StartedAt)
+			if err != nil {
+				log.Printf("Error updating last stream start: %v", err)
+				continue
 			}
 
-			// Only check for posts if PostsEnabled is true
-			if user.PostsEnabled {
-				b.checkUserPosts(user)
+			embedMsg := embed.CreateLiveStreamEmbed(user.Username, streamInfo, user.AvatarLocation, user.LiveImageURL)
+			mention := "@everyone"
+			if user.LiveMentionRole != "" {
+				mention = fmt.Sprintf("<@&%s>", user.LiveMentionRole)
+			}
+
+			targetChannel := user.LiveNotificationChannel
+			if targetChannel == "" {
+				targetChannel = user.NotificationChannel
+			}
+
+			_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
+				Content: mention,
+				Embed:   embedMsg,
+			})
+			if err != nil {
+				b.logNotificationError("live stream", user, targetChannel, err)
 			}
 		}
 	}
 }
 
-func (b *Bot) checkUserLiveStream(user models.MonitoredUser) {
-	streamInfo, err := b.APIClient.GetStreamInfo(user.UserID)
-	if err != nil {
-		log.Printf("Error fetching stream info for %s: %v", user.Username, err)
+func (b *Bot) checkUserPostsOptimized(userEntries []models.MonitoredUser) {
+	// Filter entries that have post notifications enabled
+	postEnabledUsers := make([]models.MonitoredUser, 0)
+	for _, user := range userEntries {
+		if user.PostsEnabled {
+			postEnabledUsers = append(postEnabledUsers, user)
+		}
+	}
+
+	if len(postEnabledUsers) == 0 {
 		return
 	}
 
-	if streamInfo.Response.Stream.Status == 2 && streamInfo.Response.Stream.StartedAt > user.LastStreamStart {
-		err = b.Repo.UpdateLastStreamStart(user.GuildID, user.UserID, streamInfo.Response.Stream.StartedAt)
-		if err != nil {
-			log.Printf("Error updating last stream start: %v", err)
-			return
-		}
-
-		embedMsg := embed.CreateLiveStreamEmbed(user.Username, streamInfo, user.AvatarLocation, user.LiveImageURL)
-
-		mention := "@everyone"
-		if user.LiveMentionRole != "" {
-			mention = fmt.Sprintf("<@&%s>", user.LiveMentionRole)
-		}
-
-		targetChannel := user.LiveNotificationChannel
-		if targetChannel == "" {
-			targetChannel = user.NotificationChannel
-		}
-
-		_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
-			Content: mention,
-			Embed:   embedMsg,
-		})
-		if err != nil {
-			guild, _ := b.Session.Guild(user.GuildID)
-			guildName := "Unknown Server"
-			if guild != nil {
-				guildName = guild.Name
-			}
-
-			channel, _ := b.Session.Channel(targetChannel)
-			channelName := "Unknown Channel"
-			if channel != nil {
-				channelName = channel.Name
-			}
-
-			log.Printf("Error sending live stream notification for %s | Server: %s (%s) | Channel: %s (%s) | Error: %v",
-				user.Username,
-				guildName,
-				user.GuildID,
-				channelName,
-				targetChannel,
-				err,
-			)
-		}
-	}
-}
-
-func (b *Bot) checkUserPosts(user models.MonitoredUser) {
-	postInfo, err := b.APIClient.GetTimelinePost(user.UserID)
+	// Make API call only once
+	primaryUser := postEnabledUsers[0]
+	postInfo, err := b.APIClient.GetTimelinePost(primaryUser.UserID)
 	if err != nil {
-		log.Printf("Error fetching post info for %s: %v", user.Username, err)
+		log.Printf("Error fetching post info for %s: %v", primaryUser.Username, err)
 		return
 	}
 
-	if len(postInfo) > 0 && postInfo[0].ID != user.LastPostID {
-		err = b.Repo.UpdateLastPostID(user.GuildID, user.UserID, postInfo[0].ID)
-		if err != nil {
-			log.Printf("Error updating last post ID: %v", err)
-			return
-		}
-
-		// Fetch post media
+	if len(postInfo) > 0 && postInfo[0].ID != primaryUser.LastPostID {
+		// Fetch post media once
 		postMedia, err := b.APIClient.GetPostMedia(postInfo[0].ID, b.APIClient.Token, b.APIClient.UserAgent)
 		if err != nil {
 			log.Printf("Error fetching post media: %v", err)
 		}
 
-		embedMsg := embed.CreatePostEmbed(user.Username, postInfo[0], user.AvatarLocation, postMedia)
-
-		mention := "@everyone"
-		if user.PostMentionRole != "" {
-			mention = fmt.Sprintf("<@&%s>", user.PostMentionRole)
-		}
-
-		targetChannel := user.PostNotificationChannel
-		if targetChannel == "" {
-			targetChannel = user.NotificationChannel
-		}
-
-		_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
-			Content: mention,
-			Embed:   embedMsg,
-		})
-		if err != nil {
-			guild, _ := b.Session.Guild(user.GuildID)
-			guildName := "Unknown Server"
-			if guild != nil {
-				guildName = guild.Name
+		// Send notifications to all servers that have this user monitored with posts enabled
+		for _, user := range postEnabledUsers {
+			err = b.Repo.UpdateLastPostID(user.GuildID, user.UserID, postInfo[0].ID)
+			if err != nil {
+				log.Printf("Error updating last post ID: %v", err)
+				continue
 			}
 
-			channel, _ := b.Session.Channel(targetChannel)
-			channelName := "Unknown Channel"
-			if channel != nil {
-				channelName = channel.Name
+			embedMsg := embed.CreatePostEmbed(user.Username, postInfo[0], user.AvatarLocation, postMedia)
+			mention := "@everyone"
+			if user.PostMentionRole != "" {
+				mention = fmt.Sprintf("<@&%s>", user.PostMentionRole)
 			}
 
-			log.Printf("Error sending post notification for %s | Server: %s (%s) | Channel: %s (%s) | Error: %v",
-				user.Username,
-				guildName,
-				user.GuildID,
-				channelName,
-				targetChannel,
-				err,
-			)
+			targetChannel := user.PostNotificationChannel
+			if targetChannel == "" {
+				targetChannel = user.NotificationChannel
+			}
+
+			_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
+				Content: mention,
+				Embed:   embedMsg,
+			})
+			if err != nil {
+				b.logNotificationError("post", user, targetChannel, err)
+			}
 		}
 	}
+}
+
+func (b *Bot) logNotificationError(notificationType string, user models.MonitoredUser, targetChannel string, err error) {
+	guild, _ := b.Session.Guild(user.GuildID)
+	guildName := "Unknown Server"
+	if guild != nil {
+		guildName = guild.Name
+	}
+	channel, _ := b.Session.Channel(targetChannel)
+	channelName := "Unknown Channel"
+	if channel != nil {
+		channelName = channel.Name
+	}
+	log.Printf("Error sending %s notification for %s | Server: %s (%s) | Channel: %s (%s) | Error: %v",
+		notificationType,
+		user.Username,
+		guildName,
+		user.GuildID,
+		channelName,
+		targetChannel,
+		err,
+	)
 }
 
 func (b *Bot) updateStatusPeriodically() {
