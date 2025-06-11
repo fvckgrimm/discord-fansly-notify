@@ -24,7 +24,14 @@ var (
 	PostgresURL  string
 
 	// Application settings
-	Debug bool
+	Debug                       bool
+	MonitorIntervalSeconds      int
+	StatusUpdateIntervalMinutes int
+	AvatarRefreshIntervalHours  int
+	MonitorWorkerCount          int
+
+	ApiRequestsPerSecond float64
+	ApiBurst             int
 )
 
 func Load() {
@@ -65,6 +72,32 @@ func Load() {
 	// Application settings
 	debugStr := os.Getenv("DEBUG")
 	Debug, _ = strconv.ParseBool(debugStr)
+
+	MonitorIntervalSeconds = getEnvAsInt("MONITOR_INTERVAL_SECONDS", 120)            // Default: 2 minutes
+	StatusUpdateIntervalMinutes = getEnvAsInt("STATUS_UPDATE_INTERVAL_MINUTES", 120) // Default: 2 hours
+	AvatarRefreshIntervalHours = getEnvAsInt("AVATAR_REFRESH_INTERVAL_HOURS", 144)   // Default: 6 days (6 * 24)
+	MonitorWorkerCount = getEnvAsInt("MONITOR_WORKER_COUNT", 10)                     // Default: 10 workers
+
+	ApiRequestsPerSecond = getEnvAsFloat64("API_REQUESTS_PER_SECOND", 2.0)
+	ApiBurst = getEnvAsInt("API_BURST", 5)
+}
+
+func getEnvAsFloat64(key string, fallback float64) float64 {
+	if value, ok := os.LookupEnv(key); ok {
+		if f, err := strconv.ParseFloat(value, 64); err == nil {
+			return f
+		}
+	}
+	return fallback
+}
+
+func getEnvAsInt(key string, fallback int) int {
+	if value, ok := os.LookupEnv(key); ok {
+		if i, err := strconv.Atoi(value); err == nil {
+			return i
+		}
+	}
+	return fallback
 }
 
 // GetDatabaseConnectionString returns the database connection string based on database type

@@ -67,53 +67,98 @@ func (b *Bot) guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 }
 
 func (b *Bot) guildDelete(s *discordgo.Session, event *discordgo.GuildDelete) {
-	log.Printf("Bot left a server: %s", event.Guild.Name)
+	// This event fires when the bot is kicked, banned, or the guild is deleted.
+	// If event.Unavailable is true, it means a Discord outage, so we shouldn't delete data.
+	if !event.Unavailable {
+		log.Printf("Bot removed from guild: %s. Cleaning up associated data.", event.ID)
+		err := b.Repo.DeleteAllUsersInGuild(event.ID)
+		if err != nil {
+			log.Printf("Error deleting users for guild %s: %v", event.ID, err)
+		} else {
+			log.Printf("Successfully cleaned up data for guild %s", event.ID)
+		}
+	} else {
+		log.Printf("Guild %s became unavailable.", event.ID)
+	}
+
 	b.updateBotStatus()
 }
 
 func (b *Bot) monitorUsers() {
-	ticker := time.NewTicker(2 * time.Minute)
+	ticker := time.NewTicker(time.Duration(config.MonitorIntervalSeconds) * time.Second)
 	defer ticker.Stop()
+
+	numWorkers := config.MonitorWorkerCount
+	if numWorkers <= 0 {
+		numWorkers = 1 // Ensure at least one worker.
+	}
+	jobs := make(chan []models.MonitoredUser, 100) // Buffered channel
+
+	// Start long-lived workers that will process jobs as they come in.
+	for w := 1; w <= numWorkers; w++ {
+		go b.worker(w, jobs)
+	}
+
+	// Run the first check immediately on bot start, then on every tick.
+	log.Println("Dispatching initial monitoring cycle...")
+	b.dispatchMonitoringJobs(jobs)
+
 	for range ticker.C {
-		users, err := b.Repo.GetMonitoredUsers()
-		if err != nil {
-			log.Printf("Error getting monitored users: %v", err)
-			continue
-		}
+		b.dispatchMonitoringJobs(jobs)
+	}
+}
 
-		// Group users by UserID to deduplicate API calls
-		userGroups := make(map[string][]models.MonitoredUser)
-		for _, user := range users {
-			userGroups[user.UserID] = append(userGroups[user.UserID], user)
-		}
+func (b *Bot) dispatchMonitoringJobs(jobs chan<- []models.MonitoredUser) {
+	users, err := b.Repo.GetMonitoredUsers()
+	if err != nil {
+		log.Printf("Error getting monitored users: %v", err)
+		return
+	}
 
-		// Process each unique user only once
-		for _, userEntries := range userGroups {
-			// Use the first entry to get user info (they should all have same UserID/Username)
-			primaryUser := userEntries[0]
+	// Group users by UserID to deduplicate API calls
+	userGroups := make(map[string][]models.MonitoredUser)
+	for _, user := range users {
+		userGroups[user.UserID] = append(userGroups[user.UserID], user)
+	}
 
-			// Check if avatar needs refreshing (only once per user)
-			if time.Now().Unix()-primaryUser.AvatarLocationUpdatedAt > 6*24*60*60 {
-				newAvatarLocation, err := b.refreshAvatarURL(primaryUser.Username)
-				if err != nil {
-					log.Printf("Error refreshing avatar URL for user %s: %v", primaryUser.Username, err)
-				} else {
-					// Update avatar for all entries of this user
-					for _, user := range userEntries {
-						err = b.Repo.UpdateAvatarInfo(user.GuildID, user.UserID, newAvatarLocation)
-						if err != nil {
-							log.Printf("Error updating avatar URL in database: %v", err)
-						}
+	log.Printf("Dispatching %d unique users to %d workers.", len(userGroups), config.MonitorWorkerCount)
+
+	// Send each group of users as a single job to the workers channel.
+	for _, userEntries := range userGroups {
+		jobs <- userEntries
+	}
+}
+
+// New worker function in bot.go
+func (b *Bot) worker(id int, jobs <-chan []models.MonitoredUser) {
+	avatarRefreshDuration := int64(config.AvatarRefreshIntervalHours * 60 * 60)
+
+	for userEntries := range jobs {
+		primaryUser := userEntries[0]
+
+		// Check if avatar needs refreshing
+		if time.Now().Unix()-primaryUser.AvatarLocationUpdatedAt > avatarRefreshDuration {
+			newAvatarLocation, err := b.refreshAvatarURL(primaryUser.Username)
+			if err != nil {
+				log.Printf("[Worker %d] Error refreshing avatar URL for %s: %v", id, primaryUser.Username, err)
+			} else {
+				// Update avatar for all entries of this user
+				for _, user := range userEntries {
+					err = b.Repo.UpdateAvatarInfo(user.GuildID, user.UserID, newAvatarLocation)
+					if err != nil {
+						log.Printf("[Worker %d] Error updating avatar URL in DB for %s in guild %s: %v", id, user.Username, user.GuildID, err)
 					}
 				}
+				// Update the avatar in memory for the current cycle's checks
+				for i := range userEntries {
+					userEntries[i].AvatarLocation = newAvatarLocation
+				}
 			}
-
-			// Check live stream only once per user
-			b.checkUserLiveStreamOptimized(userEntries)
-
-			// Check posts only once per user
-			b.checkUserPostsOptimized(userEntries)
 		}
+
+		// Check live stream and posts. These API calls now happen in parallel for different users.
+		b.checkUserLiveStreamOptimized(userEntries)
+		b.checkUserPostsOptimized(userEntries)
 	}
 }
 
@@ -183,39 +228,61 @@ func (b *Bot) checkUserPostsOptimized(userEntries []models.MonitoredUser) {
 		return
 	}
 
-	// Make API call only once
+	// Make API call only once per unique user ID
 	primaryUser := postEnabledUsers[0]
-	postInfo, err := b.APIClient.GetTimelinePost(primaryUser.UserID)
+	latestPosts, err := b.APIClient.GetTimelinePost(primaryUser.UserID)
 	if err != nil {
 		log.Printf("Error fetching post info for %s: %v", primaryUser.Username, err)
 		return
 	}
 
-	if len(postInfo) > 0 && postInfo[0].ID != primaryUser.LastPostID {
-		// Fetch post media once
-		postMedia, err := b.APIClient.GetPostMedia(postInfo[0].ID, b.APIClient.Token, b.APIClient.UserAgent)
-		if err != nil {
-			log.Printf("Error fetching post media: %v", err)
-		}
+	// If there are no posts on the timeline at all, do nothing.
+	if len(latestPosts) == 0 {
+		return
+	}
 
-		// Send notifications to all servers that have this user monitored with posts enabled
-		for _, user := range postEnabledUsers {
-			err = b.Repo.UpdateLastPostID(user.GuildID, user.UserID, postInfo[0].ID)
+	latestPost := latestPosts[0]
+
+	// Fetch post media once, as it's the same for all notifications of this post.
+	postMedia, err := b.APIClient.GetPostMedia(latestPost.ID, b.APIClient.Token, b.APIClient.UserAgent)
+	if err != nil {
+		log.Printf("Error fetching post media: %v", err)
+		// We can continue without media, the embed will just be less rich.
+	}
+
+	// Now, iterate through each server monitoring this user
+	for _, user := range postEnabledUsers {
+		// *** THE CRITICAL CHANGE IS HERE ***
+		// Check if this specific server has seen this post yet.
+		// A new server will have user.LastPostID as "" or 0, so this check will pass.
+		if latestPost.ID != user.LastPostID {
+			// This server needs a notification. First, update its state.
+			err := b.Repo.UpdateLastPostID(user.GuildID, user.UserID, latestPost.ID)
 			if err != nil {
-				log.Printf("Error updating last post ID: %v", err)
-				continue
+				log.Printf("Error updating last post ID for %s in guild %s: %v", user.Username, user.GuildID, err)
+				continue // Skip this server if DB update fails
 			}
 
-			embedMsg := embed.CreatePostEmbed(user.Username, postInfo[0], user.AvatarLocation, postMedia)
-			mention := "@everyone"
-			if user.PostMentionRole != "" {
-				mention = fmt.Sprintf("<@&%s>", user.PostMentionRole)
+			// A new entry might have an empty LastPostID. We don't want to spam with an "@everyone" ping
+			// for what is effectively a "backfill" post. We only ping if they were already tracking.
+			isFirstPostForThisServer := user.LastPostID == "" || user.LastPostID == "0"
+
+			embedMsg := embed.CreatePostEmbed(user.Username, latestPost, user.AvatarLocation, postMedia)
+
+			mention := "" // Default to no mention
+			if !isFirstPostForThisServer {
+				mention = "@everyone"
+				if user.PostMentionRole != "" {
+					mention = fmt.Sprintf("<@&%s>", user.PostMentionRole)
+				}
 			}
 
 			targetChannel := user.PostNotificationChannel
 			if targetChannel == "" {
 				targetChannel = user.NotificationChannel
 			}
+
+			log.Printf("Sending post notification for %s to guild %s. First post: %t", user.Username, user.GuildID, isFirstPostForThisServer)
 
 			_, err = b.Session.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
 				Content: mention,
@@ -251,7 +318,7 @@ func (b *Bot) logNotificationError(notificationType string, user models.Monitore
 }
 
 func (b *Bot) updateStatusPeriodically() {
-	ticker := time.NewTicker(120 * time.Minute)
+	ticker := time.NewTicker(time.Duration(config.StatusUpdateIntervalMinutes) * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {

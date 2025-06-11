@@ -95,6 +95,11 @@ func Init(dbType string, connString string) error {
 		return fmt.Errorf("failed to migrate database schema: %w", err)
 	}
 
+	err = addIndexes()
+	if err != nil {
+		return fmt.Errorf("failed to add indexes: %w", err)
+	}
+
 	// Get current schema version
 	var version models.SchemaVersion
 	result := DB.First(&version)
@@ -115,6 +120,23 @@ func Init(dbType string, connString string) error {
 	}
 
 	log.Printf("Connected to %s database successfully", dbType)
+	return nil
+}
+
+func addIndexes() error {
+	err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_monitored_users_guild_user ON monitored_users(guild_id, user_id)").Error
+	if err != nil {
+		return err
+	}
+	err = DB.Exec("CREATE INDEX IF NOT EXISTS idx_monitored_users_user_id ON monitored_users(user_id)").Error
+	if err != nil {
+		return err
+	}
+	err = DB.Exec("CREATE INDEX IF NOT EXISTS idx_monitored_users_username ON monitored_users(guild_id, username)").Error
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

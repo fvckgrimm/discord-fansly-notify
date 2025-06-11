@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/fvckgrimm/discord-fansly-notify/internal/config"
+	"golang.org/x/time/rate"
 )
 
 type Client struct {
@@ -18,6 +22,7 @@ type Client struct {
 	DeviceID   string
 	SessionID  string
 	CheckKey   string
+	Limiter    *rate.Limiter
 }
 
 type AccountInfo struct {
@@ -54,11 +59,15 @@ type FanslyResponse struct {
 }
 
 func NewClient(token, userAgent string) (*Client, error) {
+	limit := rate.Limit(config.ApiRequestsPerSecond)
+	limiter := rate.NewLimiter(limit, config.ApiBurst)
+
 	client := &Client{
 		HTTPClient: &http.Client{},
 		BaseURL:    "https://apiv3.fansly.com",
 		Token:      token,
 		UserAgent:  userAgent,
+		Limiter:    limiter,
 	}
 
 	deviceID, err := client.getDeviceID()
@@ -85,6 +94,10 @@ func NewClient(token, userAgent string) (*Client, error) {
 }
 
 func (c *Client) sendRequest(req *http.Request) (*http.Response, error) {
+	err := c.Limiter.Wait(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("rate limiter wait error: %w", err)
+	}
 	// Essential Fansly headers
 	headers := map[string]string{
 		"authorization":       c.Token,
