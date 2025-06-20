@@ -243,18 +243,9 @@ func (b *Bot) checkUserPostsOptimized(userEntries []models.MonitoredUser) {
 
 	latestPost := latestPosts[0]
 
-	// Fetch post media once, as it's the same for all notifications of this post.
-	postMedia, err := b.APIClient.GetPostMedia(latestPost.ID, b.APIClient.Token, b.APIClient.UserAgent)
-	if err != nil {
-		log.Printf("Error fetching post media: %v", err)
-		// We can continue without media, the embed will just be less rich.
-	}
-
 	// Now, iterate through each server monitoring this user
 	for _, user := range postEnabledUsers {
-		// *** THE CRITICAL CHANGE IS HERE ***
 		// Check if this specific server has seen this post yet.
-		// A new server will have user.LastPostID as "" or 0, so this check will pass.
 		if latestPost.ID != user.LastPostID {
 			// This server needs a notification. First, update its state.
 			err := b.Repo.UpdateLastPostID(user.GuildID, user.UserID, latestPost.ID)
@@ -263,18 +254,15 @@ func (b *Bot) checkUserPostsOptimized(userEntries []models.MonitoredUser) {
 				continue // Skip this server if DB update fails
 			}
 
-			// A new entry might have an empty LastPostID. We don't want to spam with an "@everyone" ping
-			// for what is effectively a "backfill" post. We only ping if they were already tracking.
+			// This flag is still useful for logging, but we won't use it to suppress the ping.
 			isFirstPostForThisServer := user.LastPostID == "" || user.LastPostID == "0"
 
-			embedMsg := embed.CreatePostEmbed(user.Username, latestPost, user.AvatarLocation, postMedia)
+			// Pass nil for postMedia, as we are no longer fetching it.
+			embedMsg := embed.CreatePostEmbed(user.Username, latestPost, user.AvatarLocation, nil)
 
-			mention := "" // Default to no mention
-			if !isFirstPostForThisServer {
-				mention = "@everyone"
-				if user.PostMentionRole != "" {
-					mention = fmt.Sprintf("<@&%s>", user.PostMentionRole)
-				}
+			mention := "@everyone"
+			if user.PostMentionRole != "" {
+				mention = fmt.Sprintf("<@&%s>", user.PostMentionRole)
 			}
 
 			targetChannel := user.PostNotificationChannel

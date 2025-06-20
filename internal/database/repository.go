@@ -3,7 +3,6 @@ package database
 import (
 	"errors"
 	"github.com/fvckgrimm/discord-fansly-notify/internal/models"
-	//"log"
 	"time"
 
 	"gorm.io/gorm"
@@ -34,33 +33,33 @@ func (r *Repository) GetMonitoredUser(guildID, userID string) (*models.Monitored
 	var user models.MonitoredUser
 	err := WithRetry(func() error {
 		result := r.db.Where("guild_id = ? AND user_id = ?", guildID, userID).First(&user)
+		if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return result.Error
+		}
+		// Pass gorm.ErrRecordNotFound up to be handled by the caller
 		return result.Error
 	})
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil // No user found
 	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &user, nil
+	return &user, err
 }
 
 func (r *Repository) GetMonitoredUserByUsername(guildID, username string) (*models.MonitoredUser, error) {
 	var user models.MonitoredUser
-	result := r.db.Where("guild_id = ? AND username = ?", guildID, username).First(&user)
+	err := WithRetry(func() error {
+		result := r.db.Where("guild_id = ? AND username = ?", guildID, username).First(&user)
+		if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return result.Error
+		}
+		return result.Error
+	})
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil // No user found
 	}
-
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	return &user, nil
+	return &user, err
 }
 
 // AddMonitoredUser adds a new monitored user
@@ -99,16 +98,16 @@ func (r *Repository) DeleteMonitoredUser(guildID, userID string) error {
 }
 
 func (r *Repository) DeleteMonitoredUserByUsername(guildID, username string) error {
-	result := r.db.Delete(&models.MonitoredUser{}, "guild_id = ? AND username = ?", guildID, username)
-	if result.Error != nil {
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Delete(&models.MonitoredUser{}, "guild_id = ? AND username = ?", guildID, username)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }
 
 // GetMonitoredUsersForGuild returns all monitored users for a specific guild
@@ -127,22 +126,6 @@ func (r *Repository) UpdateLastPostID(guildID, userID, postID string) error {
 			Where("guild_id = ? AND user_id = ?", guildID, userID).
 			Update("last_post_id", postID).Error
 	})
-}
-
-func (r *Repository) UpdateLastPostIDByUsername(guildID, username, postID string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("last_post_id", postID)
-
-	if result.Error != nil {
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-
-	return nil
 }
 
 // UpdateLastStreamStart updates the last stream start for a monitored user
@@ -166,82 +149,99 @@ func (r *Repository) UpdateAvatarInfo(guildID, userID, avatarLocation string) er
 	})
 }
 
+func (r *Repository) UpdateLastPostIDByUsername(guildID, username, postID string) error {
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Update("last_post_id", postID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
+}
+
 func (r *Repository) UpdateAvatarInfoByUsername(guildID, username, avatarLocation string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Updates(map[string]any{
-			"avatar_location":            avatarLocation,
-			"avatar_location_updated_at": time.Now().Unix(),
-		})
-
-	if result.Error != nil {
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Updates(map[string]any{
+				"avatar_location":            avatarLocation,
+				"avatar_location_updated_at": time.Now().Unix(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }
 
-// DisablePostsByUsername disables post notifications for a monitored user by username
 func (r *Repository) DisablePostsByUsername(guildID, username string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("posts_enabled", false)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Update("posts_enabled", false)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }
 
-// EnablePostsByUsername enables post notifications for a monitored user by username
 func (r *Repository) EnablePostsByUsername(guildID, username string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("posts_enabled", true)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Update("posts_enabled", true)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }
 
-// DisableLiveByUsername disables live stream notifications for a monitored user by username
 func (r *Repository) DisableLiveByUsername(guildID, username string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("live_enabled", false)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Update("live_enabled", false)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }
 
-// EnableLiveByUsername enables live stream notifications for a monitored user by username
 func (r *Repository) EnableLiveByUsername(guildID, username string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("live_enabled", true)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Update("live_enabled", true)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }
 
-// CountMonitoredUsers counts all monitored users
 func (r *Repository) CountMonitoredUsers() (int64, error) {
 	var count int64
 	err := WithRetry(func() error {
@@ -250,7 +250,6 @@ func (r *Repository) CountMonitoredUsers() (int64, error) {
 	return count, err
 }
 
-// CountGuilds counts unique guilds with monitored users
 func (r *Repository) CountGuilds() (int64, error) {
 	var count int64
 	err := WithRetry(func() error {
@@ -259,94 +258,83 @@ func (r *Repository) CountGuilds() (int64, error) {
 	return count, err
 }
 
-// DeleteAllUsersInGuild deletes all monitored users for a specific guild
 func (r *Repository) DeleteAllUsersInGuild(guildID string) error {
 	return WithRetry(func() error {
 		return r.db.Delete(&models.MonitoredUser{}, "guild_id = ?", guildID).Error
 	})
 }
 
-// UpdateLiveImageURL updates the live image URL for a monitored user
 func (r *Repository) UpdateLiveImageURL(guildID, username, imageURL string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("live_image_url", imageURL)
-
-	if result.Error != nil {
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Update("live_image_url", imageURL)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }
 
-// UpdatePostChannel updates the post notification channel for a monitored user
 func (r *Repository) UpdatePostChannel(guildID, username, channelID string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("post_notification_channel", channelID)
-
-	if result.Error != nil {
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Update("post_notification_channel", channelID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }
 
-// UpdateLiveChannel updates the live notification channel for a monitored user
 func (r *Repository) UpdateLiveChannel(guildID, username, channelID string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("live_notification_channel", channelID)
-
-	if result.Error != nil {
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Update("live_notification_channel", channelID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }
 
-// UpdatePostMentionRole updates the post mention role for a monitored user
 func (r *Repository) UpdatePostMentionRole(guildID, username, roleID string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("post_mention_role", roleID)
-
-	if result.Error != nil {
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Update("post_mention_role", roleID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }
 
-// UpdateLiveMentionRole updates the live mention role for a monitored user
 func (r *Repository) UpdateLiveMentionRole(guildID, username, roleID string) error {
-	result := r.db.Model(&models.MonitoredUser{}).
-		Where("guild_id = ? AND username = ?", guildID, username).
-		Update("live_mention_role", roleID)
-
-	if result.Error != nil {
-		return result.Error
-	}
-
-	if result.RowsAffected == 0 {
-		return errors.New("user not found")
-	}
-
-	return nil
+	return WithRetry(func() error {
+		result := r.db.Model(&models.MonitoredUser{}).
+			Where("guild_id = ? AND username = ?", guildID, username).
+			Update("live_mention_role", roleID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	})
 }

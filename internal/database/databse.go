@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/fvckgrimm/discord-fansly-notify/internal/models"
@@ -197,22 +198,24 @@ func migrateToV3(db *gorm.DB) error {
 // WithRetry performs a database operation with retry logic for locked database
 func WithRetry(operation func() error) error {
 	maxRetries := 5
-	retries := make([]int, maxRetries)
+	baseBackoff := 100 * time.Millisecond
 
-	for i := range retries {
+	for i := 0; i < maxRetries; i++ {
 		err := operation()
 		if err == nil {
 			return nil
 		}
 
-		// Special handling for SQLite busy errors
-		if DBType == "sqlite" && (err.Error() == "database is locked" || err.Error() == "database is busy") {
-			backoff := time.Duration(100*(i+1)) * time.Millisecond
-			log.Printf("Database locked, retrying in %v (attempt %d/%d)", backoff, i+1, maxRetries)
+		errStr := err.Error()
+		// Generic check for common lock/busy/timeout errors in SQLite and PostgreSQL
+		if strings.Contains(errStr, "lock") || strings.Contains(errStr, "busy") || strings.Contains(errStr, "timeout") {
+			backoff := baseBackoff * time.Duration(i+1)
+			log.Printf("Database contention detected, retrying in %v (attempt %d/%d). Error: %v", backoff, i+1, maxRetries, err)
 			time.Sleep(backoff)
 			continue
 		}
 
+		// If the error is not a lock-related one, return it immediately.
 		return err
 	}
 	return fmt.Errorf("operation failed after %d retries", maxRetries)
