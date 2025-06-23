@@ -194,7 +194,9 @@ func (b *Bot) checkUserLiveStreamOptimized(userEntries []models.MonitoredUser) {
 			}
 
 			embedMsg := embed.CreateLiveStreamEmbed(user.Username, streamInfo, user.AvatarLocation, user.LiveImageURL)
-			mention := "@everyone"
+
+			// If a role is set, create the mention string. Otherwise, it's empty.
+			var mention string
 			if user.LiveMentionRole != "" {
 				mention = fmt.Sprintf("<@&%s>", user.LiveMentionRole)
 			}
@@ -260,7 +262,8 @@ func (b *Bot) checkUserPostsOptimized(userEntries []models.MonitoredUser) {
 			// Pass nil for postMedia, as we are no longer fetching it.
 			embedMsg := embed.CreatePostEmbed(user.Username, latestPost, user.AvatarLocation, nil)
 
-			mention := "@everyone"
+			// If a role is set, create the mention string. Otherwise, it's empty.
+			var mention string
 			if user.PostMentionRole != "" {
 				mention = fmt.Sprintf("<@&%s>", user.PostMentionRole)
 			}
