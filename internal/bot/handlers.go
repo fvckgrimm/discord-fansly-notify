@@ -86,7 +86,6 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 
 	// Check if the limit is enabled (a value > 0)
 	if config.MaxMonitoredUsersPerGuild > 0 {
-		// Get the current count of monitored users for this guild
 		count, err := b.Repo.CountMonitoredUsersForGuild(i.GuildID)
 		if err != nil {
 			log.Printf("Error checking guild limit for guild %s: %v", i.GuildID, err)
@@ -94,19 +93,13 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 			return
 		}
 
-		// Check if the count has reached or exceeded the limit
 		if count >= int64(config.MaxMonitoredUsersPerGuild) {
-			// To avoid blocking updates for users who are already being monitored,
-			// we can perform a quick check. This is an optional optimization.
-			// First, try to find the user by username in this guild.
 			existingUser, _ := b.Repo.GetMonitoredUserByUsername(i.GuildID, username)
 			if existingUser == nil {
-				// The user does not exist, and the guild is at its limit, so we block the addition.
 				message := fmt.Sprintf("This server has reached its limit of %d monitored users. To add another, you must first remove one using `/remove`.", config.MaxMonitoredUsersPerGuild)
 				b.respondToInteraction(s, i, message, true)
 				return
 			}
-			// If existingUser is not nil, it means they are just updating an existing entry, so we allow it to proceed.
 		}
 	}
 
@@ -134,14 +127,31 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 			}
 		}
 
-		logMessage := fmt.Sprintf("`[ %s ]` %s:\n`Requested Creator Name:` **%s**\n----------",
-			time.Now().Format("2006-01-02 15:04:05"),
-			i.Member.User.Username,
-			username,
-		)
-		_, logErr := s.ChannelMessageSend(config.LogChannelID, logMessage)
-		if logErr != nil {
-			log.Printf("Failed to send log message: %v", logErr)
+		if config.LogChannelID != "" {
+			// Declare guildName in the outer scope
+			var guildName string
+			guild, err := s.Guild(i.GuildID)
+			if err != nil {
+				log.Printf("Could not retrieve guild details for ID %s: %v", i.GuildID, err)
+				guildName = "Unknown Server" // Fallback value
+			} else {
+				guildName = guild.Name
+			}
+
+			// Now guildName is accessible here
+			logMessage := fmt.Sprintf(
+				"`[%s]` User <@%s> (`%s`) added a creator:\n**Creator:** `%s`\n**Server:** %s (`%s`)",
+				time.Now().Format("2006-01-02 15:04:05"),
+				i.Member.User.ID,
+				i.Member.User.Username,
+				username,
+				guildName, // This now works correctly
+				i.GuildID,
+			)
+			_, logErr := s.ChannelMessageSend(config.LogChannelID, logMessage)
+			if logErr != nil {
+				log.Printf("Failed to send log message to channel %s: %v", config.LogChannelID, logErr)
+			}
 		}
 
 		accountInfo, err := b.APIClient.GetAccountInfo(username)
