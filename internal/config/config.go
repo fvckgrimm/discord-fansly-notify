@@ -29,6 +29,7 @@ var (
 	StatusUpdateIntervalMinutes int
 	AvatarRefreshIntervalHours  int
 	MonitorWorkerCount          int
+	MaxMonitoredUsersPerGuild   int
 
 	ApiRequestsPerSecond float64
 	ApiBurst             int
@@ -77,6 +78,7 @@ func Load() {
 	StatusUpdateIntervalMinutes = getEnvAsInt("STATUS_UPDATE_INTERVAL_MINUTES", 120) // Default: 2 hours
 	AvatarRefreshIntervalHours = getEnvAsInt("AVATAR_REFRESH_INTERVAL_HOURS", 144)   // Default: 6 days (6 * 24)
 	MonitorWorkerCount = getEnvAsInt("MONITOR_WORKER_COUNT", 10)                     // Default: 10 workers
+	MaxMonitoredUsersPerGuild = getEnvAsInt("MAX_MONITORED_USERS_PER_GUILD", 5)
 
 	ApiRequestsPerSecond = getEnvAsFloat64("API_REQUESTS_PER_SECOND", 2.0)
 	ApiBurst = getEnvAsInt("API_BURST", 5)

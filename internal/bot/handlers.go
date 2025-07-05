@@ -84,6 +84,32 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 
 	username := extractUsernameFromURL(rawUsername)
 
+	// Check if the limit is enabled (a value > 0)
+	if config.MaxMonitoredUsersPerGuild > 0 {
+		// Get the current count of monitored users for this guild
+		count, err := b.Repo.CountMonitoredUsersForGuild(i.GuildID)
+		if err != nil {
+			log.Printf("Error checking guild limit for guild %s: %v", i.GuildID, err)
+			b.respondToInteraction(s, i, "An error occurred while checking the server's limit. Please try again later.", true)
+			return
+		}
+
+		// Check if the count has reached or exceeded the limit
+		if count >= int64(config.MaxMonitoredUsersPerGuild) {
+			// To avoid blocking updates for users who are already being monitored,
+			// we can perform a quick check. This is an optional optimization.
+			// First, try to find the user by username in this guild.
+			existingUser, _ := b.Repo.GetMonitoredUserByUsername(i.GuildID, username)
+			if existingUser == nil {
+				// The user does not exist, and the guild is at its limit, so we block the addition.
+				message := fmt.Sprintf("This server has reached its limit of %d monitored users. To add another, you must first remove one using `/remove`.", config.MaxMonitoredUsersPerGuild)
+				b.respondToInteraction(s, i, message, true)
+				return
+			}
+			// If existingUser is not nil, it means they are just updating an existing entry, so we allow it to proceed.
+		}
+	}
+
 	if tokenRegex.MatchString(username) {
 		b.respondToInteraction(s, i, "Error: Username appears to contain a token. Please provide a valid username.", true)
 		return

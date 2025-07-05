@@ -119,6 +119,15 @@ func (r *Repository) GetMonitoredUsersForGuild(guildID string) ([]models.Monitor
 	return users, err
 }
 
+// New function to count monitored users for a guild
+func (r *Repository) CountMonitoredUsersForGuild(guildID string) (int64, error) {
+	var count int64
+	err := WithRetry(func() error {
+		return r.db.Model(&models.MonitoredUser{}).Where("guild_id = ?", guildID).Count(&count).Error
+	})
+	return count, err
+}
+
 // UpdateLastPostID updates the last post ID for a monitored user
 func (r *Repository) UpdateLastPostID(guildID, userID, postID string) error {
 	return WithRetry(func() error {
