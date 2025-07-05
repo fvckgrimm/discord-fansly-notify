@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -24,11 +25,27 @@ func (b *Bot) ready(s *discordgo.Session, event *discordgo.Ready) {
 	b.updateBotStatus()
 }
 
+func (b *Bot) isBotOwner(i *discordgo.InteractionCreate) bool {
+	if config.BotOwnerID == "" {
+		return false // Can't be the owner if the ID isn't configured
+	}
+	return i.Member.User.ID == config.BotOwnerID
+}
+
 func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Handle different interaction types
 	switch i.Type {
 	case discordgo.InteractionApplicationCommand:
-		if !b.hasAdminOrModPermissions(s, i) {
+		// First, handle owner-only command checks
+		switch i.ApplicationCommandData().Name {
+		case "leave", "servers":
+			if !b.isBotOwner(i) {
+				b.respondToInteraction(s, i, "This command is for the bot owner only.", true)
+				return
+			}
+		}
+
+		// Second, handle general permission checks for non-owners
+		if !b.isBotOwner(i) && !b.hasAdminOrModPermissions(s, i) {
 			username := "User"
 			if i.User != nil {
 				username = i.User.Username
@@ -40,7 +57,7 @@ func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 			return
 		}
 
-		// Handle application commands
+		// Finally, handle the command logic
 		switch i.ApplicationCommandData().Name {
 		case "add":
 			b.handleAddCommand(s, i)
@@ -58,10 +75,17 @@ func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleSetPostMentionCommand(s, i)
 		case "setlivemention":
 			b.handleSetLiveMentionCommand(s, i)
+		case "servers":
+			b.handleServersCommand(s, i)
+		case "leave":
+			b.handleLeaveCommand(s, i)
 		}
 
 	case discordgo.InteractionMessageComponent:
-		// Button interactions are handled by the pagination collector
+		// All button clicks and other components fall here.
+		// The specific handler for pagination is registered in `pagination.go`
+		// and will pick up the event. We don't need to do anything else here.
+		// This case prevents the code from panicking and allows the event to be processed correctly.
 	}
 }
 
@@ -266,6 +290,80 @@ func (b *Bot) handleAddCommand(s *discordgo.Session, i *discordgo.InteractionCre
 
 		b.editInteractionResponse(s, i, fmt.Sprintf("Successfully added **%s** to the monitoring list for all notifications.", username))
 	}()
+}
+
+func (b *Bot) handleServersCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+	if err != nil {
+		log.Printf("Error deferring interaction: %v", err)
+		return
+	}
+
+	guilds := b.Session.State.Guilds
+	if len(guilds) == 0 {
+		b.editInteractionResponse(s, i, "The bot is not currently in any servers.")
+		return
+	}
+
+	// Sort guilds by name for a cleaner list
+	sort.Slice(guilds, func(i, j int) bool {
+		return guilds[i].Name < guilds[j].Name
+	})
+
+	var serverDetails []string
+	for _, guild := range guilds {
+		line := fmt.Sprintf("**%s**\n  `ID:` %s\n  `Members:` %d", guild.Name, guild.ID, guild.MemberCount)
+		serverDetails = append(serverDetails, line)
+	}
+
+	requestedPage := 1
+	if len(i.ApplicationCommandData().Options) > 0 {
+		requestedPage = int(i.ApplicationCommandData().Options[0].IntValue())
+		requestedPage = max(1, requestedPage)
+	}
+
+	// We can reuse the existing pagination logic!
+	b.sendPaginatedList(s, i, serverDetails, requestedPage)
+}
+
+// New handler for the /leave command
+func (b *Bot) handleLeaveCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+	if err != nil {
+		log.Printf("Error deferring interaction: %v", err)
+		return
+	}
+
+	identifier := i.ApplicationCommandData().Options[0].StringValue()
+	var targetGuild *discordgo.Guild
+
+	// Search for the guild by ID or name
+	for _, guild := range b.Session.State.Guilds {
+		if guild.ID == identifier || guild.Name == identifier {
+			targetGuild = guild
+			break
+		}
+	}
+
+	if targetGuild == nil {
+		b.editInteractionResponse(s, i, fmt.Sprintf("Error: Could not find a server with the name or ID `%s`.", identifier))
+		return
+	}
+
+	// Leave the guild
+	err = s.GuildLeave(targetGuild.ID)
+	if err != nil {
+		log.Printf("Failed to leave guild %s (%s): %v", targetGuild.Name, targetGuild.ID, err)
+		b.editInteractionResponse(s, i, fmt.Sprintf("An error occurred while trying to leave **%s**.", targetGuild.Name))
+		return
+	}
+
+	log.Printf("Bot was instructed to leave guild %s (%s) by the owner.", targetGuild.Name, targetGuild.ID)
+	b.editInteractionResponse(s, i, fmt.Sprintf("✅ Successfully left **%s**.", targetGuild.Name))
 }
 
 func (b *Bot) handleRemoveCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {

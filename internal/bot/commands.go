@@ -177,6 +177,31 @@ func (b *Bot) registerCommands() {
 				},
 			},
 		},
+		// --- NEW BOT OWNER COMMANDS ---
+		{
+			Name:        "servers",
+			Description: "[Owner Only] List all servers the bot is in.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "page",
+					Description: "Page number to display",
+					Required:    false,
+				},
+			},
+		},
+		{
+			Name:        "leave",
+			Description: "[Owner Only] Make the bot leave a specific server.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "server",
+					Description: "The ID or Name of the server to leave.",
+					Required:    true,
+				},
+			},
+		},
 	}
 
 	_, err := b.Session.ApplicationCommandBulkOverwrite(b.Session.State.User.ID, "", commands)
