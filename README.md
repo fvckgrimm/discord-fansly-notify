@@ -6,7 +6,7 @@
 > [!NOTE]
 > Self hosted versions of the bot **may** display post in servers if the account used is subscribed but no actual photos or videos are displayed in the embed messages. I did plan on having any preview images/videos be sent but didn't seem to work, and I refused to have them sent as attachments.
 
-[Add to your server](https://discord.com/oauth2/authorize?client_id=1271878764933943467)
+[Add to your server](https://notifansly.xyz/)
 
 ## TODO:
 
