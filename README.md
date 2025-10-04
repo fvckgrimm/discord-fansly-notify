@@ -1,5 +1,9 @@
 # Discord Fansly Notifier
 
+
+> [!important] The project has been moved to [this repo](https://github.com/NotiFansly/notifansly-bot)
+
+
 > [!WARNING]
 > This is an unofficial fansly bot for discord to be notified of new post and when a creator goes live on the platform. This only works if the creators profile either has no requirements for being viewed or just needing to be followed to view. No actual content is leaked via this bot if used via provided bot link or if self ran with a basic account just following.
 
