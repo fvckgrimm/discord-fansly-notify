@@ -1,7 +1,8 @@
 # Discord Fansly Notifier
 
 
-> [!IMPORTANT] The project has been moved to [this repo](https://github.com/NotiFansly/notifansly-bot)
+> [!IMPORTANT]
+> The project has been moved to [this repo](https://github.com/NotiFansly/notifansly-bot)
 
 
 > [!WARNING]
